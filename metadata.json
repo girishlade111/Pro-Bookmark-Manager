@@ -1,0 +1,8 @@
+{
+  "name": "Personal Visual Bookmark Manager",
+  "description": "Private, single-owner cloud bookmark manager with conservative full-URL duplicate detection, manual category priority, and PostgreSQL persistence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
