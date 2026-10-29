@@ -48,6 +48,8 @@ export async function PATCH(
       categoryId:
         parsed.data.categoryId === '' ? null : parsed.data.categoryId,
       isFavorite: parsed.data.isFavorite,
+      tags: parsed.data.tags,
+      createReusableRule: parsed.data.createReusableRule ?? null,
     });
 
     return NextResponse.json({ bookmark: updated });

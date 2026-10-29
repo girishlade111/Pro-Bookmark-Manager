@@ -6,8 +6,10 @@ import {
   fallbackDeleteCategory,
   fallbackGetCategories,
   fallbackHydrateBookmarks,
+  fallbackRenameCategory,
 } from '../../db/server-store.ts';
 import type { CategoryRecord, CategoryWithChildren } from '../../types/bookmark.ts';
+import { ensureInitialTaxonomyForOwner } from '../classification/classification-service.ts';
 
 export class CategoryValidationError extends Error {
   constructor(message: string) {
@@ -59,11 +61,13 @@ function buildCategoryTree(
       (acc, sub) => acc + (directCounts.get(sub.id) ?? 0),
       0
     );
-    const totalCount = (directCounts.get(main.id) ?? 0) + subCountSum;
+    const directCount = directCounts.get(main.id) ?? 0;
+    const totalCount = directCount + subCountSum;
     return {
       ...main,
       subcategories: subs,
       bookmarkCount: totalCount,
+      directCount,
     };
   });
 
@@ -75,6 +79,8 @@ export async function listCategoriesForOwner(ownerId: string): Promise<{
   tree: CategoryWithChildren[];
 }> {
   try {
+    await ensureInitialTaxonomyForOwner(ownerId);
+
     if (!process.env.SQL_HOST) {
       const flat = fallbackGetCategories(ownerId);
       const bms = fallbackHydrateBookmarks(ownerId);
@@ -145,7 +151,7 @@ export async function createCategoryForOwner(
       }
       if (parent.parentCategoryId) {
         throw new CategoryValidationError(
-          'Subcategories can only be nested under a main category (2 levels max in Phase 1).'
+          'Subcategories can only be nested under a main category (2 levels max).'
         );
       }
     }
@@ -187,6 +193,75 @@ export async function createCategoryForOwner(
     }
     console.error('Database insert failed in createCategoryForOwner:', error);
     throw new Error('Failed to create category in database.', { cause: error });
+  }
+}
+
+export async function renameCategoryForOwner(
+  ownerId: string,
+  categoryId: string,
+  newName: string
+): Promise<CategoryRecord> {
+  const cleanName = (newName || '').trim();
+  if (!cleanName) {
+    throw new CategoryValidationError('Category name cannot be empty.');
+  }
+
+  try {
+    const existingOwnerCategories = !process.env.SQL_HOST
+      ? fallbackGetCategories(ownerId)
+      : (
+          await db
+            .select()
+            .from(categories)
+            .where(eq(categories.ownerId, ownerId))
+        ).map(mapCategoryRow);
+
+    const target = existingOwnerCategories.find((c) => c.id === categoryId);
+    if (!target) {
+      throw new CategoryValidationError('Category not found.');
+    }
+
+    const duplicateSibling = existingOwnerCategories.find(
+      (c) =>
+        c.id !== categoryId &&
+        (c.parentCategoryId ?? null) === (target.parentCategoryId ?? null) &&
+        c.name.toLowerCase() === cleanName.toLowerCase()
+    );
+
+    if (duplicateSibling) {
+      throw new CategoryValidationError(
+        `Another category named "${cleanName}" already exists at this level.`
+      );
+    }
+
+    if (!process.env.SQL_HOST) {
+      const updated = fallbackRenameCategory(ownerId, categoryId, cleanName);
+      if (!updated) {
+        throw new CategoryValidationError('Category not found.');
+      }
+      return updated;
+    }
+
+    const [updatedRow] = await db
+      .update(categories)
+      .set({
+        name: cleanName,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(categories.id, categoryId), eq(categories.ownerId, ownerId)))
+      .returning();
+
+    if (!updatedRow) {
+      throw new CategoryValidationError('Category not found.');
+    }
+
+    return mapCategoryRow(updatedRow);
+  } catch (error) {
+    if (error instanceof CategoryValidationError) {
+      throw error;
+    }
+    console.error('Database update failed in renameCategoryForOwner:', error);
+    throw new Error('Failed to rename category in database.', { cause: error });
   }
 }
 

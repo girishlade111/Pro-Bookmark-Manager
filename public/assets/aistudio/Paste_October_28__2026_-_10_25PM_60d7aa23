@@ -1,0 +1,1228 @@
+# PHASE 3 — PERSONAL VISUAL BOOKMARK MANAGER
+## Deterministic Non-AI Categorization Engine, 18/83 Taxonomy, Smart Rules & Manual Review
+
+### YOUR ROLE
+
+Act as a Senior Full-Stack Engineer, TypeScript Architect, Database Engineer, and Rule-Based Classification Systems Developer.
+
+You are continuing development of my existing **Personal Visual Bookmark Manager** application.
+
+Phase 1 established the project foundation, authentication, database, basic bookmark CRUD and category support.
+
+Phase 2 introduced browser HTML imports, source-folder preservation, conservative full-URL duplicate detection, import previews and import history.
+
+Your task is to **implement Phase 3 directly inside the existing application**.
+
+Do not recreate the project, redesign the application, or replace the approved technology stack.
+
+**IMPORTANT: Build the actual working categorization system. Do not respond with only an implementation plan.**
+
+---
+
+# 1. PRIMARY OBJECTIVE
+
+Develop a deterministic, explainable, rule-based bookmark categorization engine that automatically organizes new and previously imported bookmarks into relevant categories and subcategories.
+
+The engine must:
+
+1. Support exactly 18 initial main categories.
+2. Support exactly 83 initial named subcategories.
+3. Analyze existing source folder information.
+4. Analyze bookmark domains, hostnames and URL paths.
+5. Analyze stored bookmark titles and available descriptions.
+6. Use predefined keywords, dictionaries and classification rules.
+7. Support custom owner-defined classification rules.
+8. Prioritize manually selected categories.
+9. Generate explainable confidence scores.
+10. Automatically categorize only sufficiently confident bookmarks.
+11. Send uncertain/conflicting bookmarks to a manual review queue.
+12. Support user corrections and reusable rules.
+13. Integrate classification into the existing HTML import workflow.
+14. Support safe reclassification of existing unlocked bookmarks.
+15. Preserve full-URL bookmark identity and original import provenance.
+
+**The application must not depend on AI models, AI APIs, LLMs, embeddings, inference services, or paid classification providers.**
+
+# 2. APPROVED TECHNOLOGY STACK
+
+Continue using:
+
+- Next.js App Router.
+- TypeScript.
+- Tailwind CSS.
+- shadcn/ui.
+- Neon PostgreSQL.
+- Neon Managed Better Auth.
+- Google OAuth.
+- Vercel-compatible architecture.
+
+Build the categorization engine in plain TypeScript.
+
+Do not introduce Python classification services, TensorFlow, LangChain, OpenAI, Gemini, Anthropic, vector databases or external AI APIs.
+
+The coding agent itself may use AI to write source code, but the deployed application's classification must use deterministic rules only.
+
+# 3. EXISTING PROJECT INSPECTION
+
+Before implementing:
+
+- Inspect existing bookmark and category models.
+- Locate Phase 1 URL identity and CRUD services.
+- Locate Phase 2 import parsing and persistence services.
+- Check whether source folder paths are preserved.
+- Check existing manual category assignment and lock fields.
+- Inspect relevant database migrations.
+- Locate existing dashboard and category components.
+- Read applicable project documentation.
+
+Relevant documents, when available:
+
+- `PRD.md`
+- `ARCHITECTURE.md`
+- `DATABASE_SCHEMA.md`
+- `CATEGORIZATION_ENGINE.md`
+- `DUPLICATE_DETECTION.md`
+- `IMPORT_EXPORT.md`
+- `docs/engines/CATEGORIZATION_ENGINE_GUIDE.md`
+- `DO_AND_DONT.md`
+
+Do not invent missing documentation.
+
+Reuse the current architecture and add only the necessary functionality.
+
+# 4. ABSOLUTE RULE — USER CATEGORY PRIORITY
+
+This is the highest-priority classification requirement.
+
+**If the owner manually selects a category or subcategory, automatic classification must never override it.**
+
+Classification precedence, from highest to lowest:
+
+| Priority | Classification source |
+|---|---|
+| 1 | Explicit owner-selected category during Add/Import |
+| 2 | Previously saved manual category assignment with active manual lock |
+| 3 | Owner-approved source-folder-to-category mapping |
+| 4 | Owner-defined exact URL or more-specific path/domain rules |
+| 5 | Initial source-folder seed mappings |
+| 6 | Generic domain, URL path, title, description and keyword rules |
+| 7 | Uncategorized / Needs Manual Review |
+
+Example:
+
+Bookmark:
+
+`https://youtube.com/watch?v=react123`
+
+Owner-selected category:
+
+`Development & Programming → Coding Education & Examples`
+
+The system must preserve that category even if a generic domain rule maps YouTube to Entertainment.
+
+Never change that manually selected category without explicit owner action.
+
+The same protection must apply during:
+
+- New imports.
+- Duplicate imports.
+- Background classification.
+- Reclassification.
+- Rule updates.
+- Category suggestions.
+
+# 5. INITIAL TAXONOMY — 18 MAIN CATEGORIES / 83 SUBCATEGORIES
+
+Create the following initial category hierarchy in Neon PostgreSQL.
+
+Preserve these exact initial category names.
+
+## 1. Development & Programming — 8 Subcategories
+
+- Code Editors & IDEs
+- Git & Repositories
+- Frontend & UI Frameworks
+- Backend & APIs
+- SDKs & Developer Utilities
+- DevOps & Automation
+- Coding Education & Examples
+- Code Templates & Snippets
+
+## 2. AI Tools & Agents — 9 Subcategories
+
+- LLM Chatbots
+- AI Agents & Agent Builders
+- Models & Open-Source Hubs
+- Local LLM & Inference
+- AI Coding Assistants
+- AI Research & Search
+- Prompt Libraries
+- MCP & Agent Tooling
+- Voice AI & Speech
+
+## 3. Cloud & Infrastructure — 6 Subcategories
+
+- Cloud Compute & VPS
+- Hosting & PaaS
+- Managed Databases
+- Object Storage & File Hosting
+- Identity & Authentication Services
+- Infrastructure Operations
+
+## 4. Website & App Builders — 5 Subcategories
+
+- AI Website Builders
+- No-Code & Low-Code
+- Website Templates
+- Site Platforms & CMS
+- Android & APK Builders
+
+## 5. Design & Creative Assets — 6 Subcategories
+
+- UI/UX Design
+- Brand & Logo Design
+- Icons & PNG Assets
+- 3D Models & Elements
+- UI Templates & Design Systems
+- Stock Images & Illustration
+
+## 6. Media & Content Creation — 6 Subcategories
+
+- Video Creation & Editing
+- Image Generation & Editing
+- Audio & Music
+- Podcast Production
+- Animation & Avatars
+- Presentations & Slides
+
+## 7. Productivity & Collaboration — 5 Subcategories
+
+- Notes & Knowledge
+- Documents & Workspaces
+- Project & Task Management
+- Automation & Workflows
+- Mind Maps & Diagrams
+
+## 8. Marketing & Monetization — 5 Subcategories
+
+- SEO & Search Marketing
+- Paid Advertising & Creative
+- Affiliate Programs
+- Website & Link Monetization
+- Analytics & Growth
+
+## 9. Security & Privacy — 4 Subcategories
+
+- Password Managers
+- Identity & OTP
+- Security Tools
+- Privacy & Temporary Access
+
+## 10. Browsers & Extensions — 4 Subcategories
+
+- Browser Extensions
+- Virtual & Remote Browsers
+- Browser Productivity
+- Browser Utilities & Capture
+
+## 11. Communication & Email — 3 Subcategories
+
+- Email Providers
+- Temporary Email
+- Chat, Forms & Customer Support
+
+## 12. Learning & Reference — 4 Subcategories
+
+- Learning Platforms
+- Technical Tutorials
+- Study & Research
+- Documentation & Reference
+
+## 13. Business & Startups — 4 Subcategories
+
+- Startup Programs & Credits
+- Business Tools
+- Marketplaces & Directories
+- Sales & Operations
+
+## 14. Entertainment & Lifestyle — 4 Subcategories
+
+- Movies & Series
+- Anime & Animation Viewing
+- Music & Pop Culture
+- General Recreation
+
+## 15. Downloads & File Utilities — 3 Subcategories
+
+- Download Managers
+- PDF & Document Utilities
+- File Conversion & Compression
+
+## 16. Shopping & Consumer — 2 Subcategories
+
+- Shopping & E-commerce
+- Wishlists & Buying Research
+
+## 17. Personal & Private — 3 Subcategories
+
+- Personal Collections
+- Private / Sensitive
+- Other Personal Interests
+
+## 18. Uncategorized & Review — 2 Subcategories
+
+- Uncategorized
+- Needs Manual Review
+
+**Total: 18 main categories and 83 named subcategories.**
+
+### Taxonomy Requirements
+
+- Store categories in Neon PostgreSQL.
+- Use stable category IDs.
+- Use parent-child relationships.
+- Preserve category ordering.
+- Do not recreate an existing category if it already exists.
+- Seed categories idempotently.
+- Support future renaming and deeper nesting.
+- Do not silently delete existing owner-created categories.
+- Do not automatically create hundreds of new top-level categories.
+- Do not classify existing bookmarks merely because their source folder names superficially resemble a category.
+
+The initial taxonomy is configurable seed data, not an unchangeable classification verdict for every bookmark.
+
+# 6. DETERMINISTIC CLASSIFICATION ENGINE
+
+Create a reusable TypeScript classification service.
+
+Suggested module structure:
+
+```text
+src/lib/classification/
+  engine.ts
+  rule-matcher.ts
+  scoring.ts
+  confidence.ts
+  folder-mappings.ts
+  keyword-dictionary.ts
+  taxonomy.ts
+  types.ts
+  classification-service.ts
+```
+
+Adapt to the existing project structure.
+
+Do not couple the classification algorithm to React components.
+
+### Classification Inputs
+
+The engine should use available signals:
+
+1. Explicit user-selected category.
+2. Existing manual category lock.
+3. Original browser folder path.
+4. Approved folder mappings.
+5. Exact URL rules.
+6. Hostname/domain rules.
+7. URL path and query patterns.
+8. Bookmark title.
+9. Existing description.
+10. Keyword dictionary.
+11. Owner-defined rules.
+12. Previously approved classification corrections.
+
+Existing safe metadata already stored in the database may be used.
+
+Do not implement remote website scraping or new metadata-fetching services during Phase 3.
+
+### Classification Flow
+
+```text
+Bookmark
+   |
+   v
+Check Manual Category / Lock
+   |
+   +-- Locked --> Preserve Current Category
+   |
+   v
+Collect Classification Signals
+   |
+   v
+Match Approved Rules
+   |
+   v
+Match Source Folder Rules
+   |
+   v
+Match URL / Host / Path
+   |
+   v
+Match Title / Description / Keywords
+   |
+   v
+Score Category Candidates
+   |
+   v
+Apply Rule Priority and Conflict Handling
+   |
+   v
+High Confidence?
+   |
+   +-- Yes --> Assign Category
+   |
+   +-- No --> Suggest or Add to Review Queue
+   |
+   v
+Store Decision, Evidence & Confidence
+```
+
+The engine must return deterministic results for identical inputs and the same ruleset version.
+
+# 7. SOURCE FOLDER-BASED CLASSIFICATION
+
+Phase 2 preserves original browser folder paths.
+
+Use this information as an important classification signal.
+
+Example:
+
+```text
+Bookmarks bar
+  └── Development
+       └── Code Editors
+            └── https://code.visualstudio.com
+```
+
+Suggested category:
+
+`Development & Programming → Code Editors & IDEs`
+
+However, source folders are evidence, not infallible ground truth.
+
+### Initial Folder Mapping Examples
+
+| Original folder label | Suggested target |
+|---|---|
+| IDE Repo | Development / Code Editors & IDEs |
+| Code Editor | Development / Code Editors & IDEs |
+| Coding Tools | Development / Code Editors & IDEs or Developer Utilities |
+| Awesome Github | Development / Git & Repositories |
+| AI Agent | AI Tools / AI Agents & Agent Builders |
+| Local LLM | AI Tools / Local LLM & Inference |
+| Open Source AI Model | AI Tools / Models & Open-Source Hubs |
+| MCP | AI Tools / MCP & Agent Tooling |
+| Prompt | AI Tools / Prompt Libraries |
+| Cloud Compute | Cloud / Cloud Compute & VPS |
+| S3 Storage | Cloud / Object Storage & File Hosting |
+| Site Builder | Website & App Builders |
+| APK builder | Website & App Builders / Android & APK Builders |
+| 3D Elements | Design / 3D Models & Elements |
+| Video tools | Media / Video Creation & Editing |
+| SEO | Marketing / SEO & Search Marketing |
+| Temp Mail | Communication / Temporary Email |
+| PDF / Docs | Downloads / PDF & Document Utilities |
+| Movies | Entertainment / Movies & Series |
+
+These mappings are proposed seeds.
+
+Do not treat ambiguous names as definitive classifications.
+
+### Matching Behavior
+
+- Compare case-insensitively for folder-name matching.
+- Handle harmless whitespace differences.
+- Support configured synonyms.
+- Consider the full nested source path.
+- Give specific folder matches greater relevance than broad container names.
+- Preserve original folder labels unchanged.
+- Use category IDs rather than display-name strings for assignments.
+
+Generic folders such as `Bookmarks bar`, `Favorites bar`, `Other Bookmarks` or `Synced Bookmarks` must not be treated as topical classification signals.
+
+If an imported bookmark has multiple source folder occurrences, evaluate relevant evidence without duplicating the canonical bookmark.
+
+# 8. URL, DOMAIN AND PATH MATCHING
+
+Create rule matching for:
+
+- Exact normalized full URL.
+- Exact hostname.
+- Explicit subdomain patterns.
+- Path prefixes.
+- URL path segments.
+- Relevant query parameters.
+
+Example:
+
+`github.com/user/repository`
+
+May indicate:
+
+`Development & Programming → Git & Repositories`
+
+However, a specific AI repository may be more appropriately categorized under AI Tools if stronger signals or an approved owner rule support that choice.
+
+Example:
+
+`youtube.com/watch?v=123`
+
+The domain alone cannot establish whether it is:
+
+- Entertainment content.
+- A programming tutorial.
+- An AI demonstration.
+- A business lecture.
+- A technical reference.
+
+Use title, source folder and more-specific rules.
+
+If insufficient evidence exists, send it for review.
+
+### Important Separation
+
+**Domain-based rules are allowed for categorization.**
+
+**Domain-based duplicate detection is prohibited.**
+
+Do not modify the previously approved full-URL identity algorithm.
+
+Use exact hostname boundaries: a rule matching `github.com` must not accidentally match `evilgithub.com`.
+
+# 9. KEYWORD-BASED CLASSIFICATION
+
+Create a configurable keyword dictionary.
+
+Example:
+
+```ts
+const classificationKeywords = {
+  "Code Editors & IDEs": [
+    "ide",
+    "code editor",
+    "online compiler",
+    "code playground"
+  ],
+  "AI Coding Assistants": [
+    "ai coding assistant",
+    "code generation assistant",
+    "agentic coding"
+  ],
+  "Managed Databases": [
+    "postgresql",
+    "managed database",
+    "database hosting"
+  ],
+  "SEO & Search Marketing": [
+    "seo",
+    "search engine optimization",
+    "keyword research"
+  ]
+};
+```
+
+Expand this dictionary thoughtfully to cover the initial taxonomy.
+
+Support:
+
+- Case-insensitive matching.
+- Tokenized text.
+- Phrase matching.
+- Configured synonyms.
+- Weighted keywords.
+- Negative/conflicting indicators.
+- Multiple category candidates.
+
+Do not blindly match short substrings.
+
+For example, matching `ai` inside unrelated words is not acceptable evidence.
+
+A single generic keyword must not override explicit user selections or stronger context.
+
+Keep dictionaries editable or extensible without requiring changes to every UI component.
+
+# 10. CONFIDENCE SCORING
+
+Implement a deterministic confidence-scoring system.
+
+Confidence represents strength of rule evidence, not a measured probability that the category is correct.
+
+Suggested initial thresholds:
+
+| Confidence | Behavior |
+|---|---|
+| 0.90–1.00 | Automatically categorize if unambiguous |
+| 0.65–0.89 | Suggest category and request review |
+| Below 0.65 | Uncategorized / Needs Manual Review |
+
+Make these values configurable.
+
+### Scoring Considerations
+
+Higher confidence may result from:
+
+- A specific approved owner rule.
+- A strong source-folder mapping supported by title evidence.
+- An exact hostname match supported by a specific path pattern.
+- Multiple independent matching signals.
+- A precise keyword phrase.
+
+Lower confidence should result from:
+
+- Ambiguous domain.
+- Missing title.
+- Conflicting folder and title signals.
+- Generic keywords.
+- Multiple similarly ranked candidate categories.
+
+Do not sum arbitrary weights without bounding or normalization.
+
+Use deterministic tie-breaking and route unresolved near-ties to review.
+
+### Parent/Subcategory Confidence
+
+If the main category is clear but a subcategory is uncertain:
+
+- Preserve the confident main-category assignment where supported.
+- Leave the child assignment unresolved.
+- Mark the bookmark for review when appropriate.
+
+Never invent a subcategory merely to fill a database field.
+
+### Classification Result
+
+Return structured data such as:
+
+```ts
+type ClassificationResult = {
+  categoryId: string | null;
+  subcategoryId: string | null;
+  confidence: number;
+  status:
+    | "manual"
+    | "auto_classified"
+    | "suggested"
+    | "needs_review";
+  matchedRuleIds: string[];
+  evidence: string[];
+  rulesetVersion: string;
+  requiresReview: boolean;
+};
+```
+
+Store classification reasoning in the database.
+
+# 11. DATABASE EXTENSIONS
+
+Extend the existing Neon PostgreSQL schema.
+
+Do not rebuild Phase 1 or Phase 2 tables.
+
+Introduce or reuse appropriate entities for:
+
+### classification_rules
+
+Store:
+
+- Rule ID.
+- Owner ID.
+- Rule type.
+- Matching definition.
+- Target category ID.
+- Optional target subcategory.
+- Priority.
+- Enabled status.
+- Source: owner or system seed.
+- Version.
+- Created/updated timestamps.
+
+### classification_decisions
+
+Store:
+
+- Bookmark ID.
+- Category/subcategory decision.
+- Classification method.
+- Confidence.
+- Matched rule IDs.
+- Ruleset version.
+- Human-readable explanation.
+- Timestamp.
+
+### classification_review_queue
+
+Store:
+
+- Bookmark ID.
+- Suggested category/subcategory.
+- Confidence.
+- Review reason.
+- Status.
+- Created/resolved timestamps.
+
+### Manual Category Metadata
+
+Reuse or extend existing data to preserve:
+
+- Manual assignment source.
+- Manual lock.
+- Last manual correction.
+- Approved rule association where applicable.
+
+### Data Integrity Rules
+
+- Preserve one canonical bookmark per full-URL identity.
+- Do not create duplicate bookmark records through classification.
+- Keep one primary category placement per canonical bookmark when assigned.
+- Use foreign keys for category references.
+- Prevent unauthorized owner access.
+- Do not delete original import occurrences.
+- Use additive migrations.
+- Never drop existing bookmark data to rebuild the taxonomy.
+
+# 12. AUTO-CATEGORIZATION AFTER IMPORT
+
+Integrate the new engine into the existing Phase 2 import workflow.
+
+After successful import confirmation:
+
+1. Identify newly created canonical bookmarks.
+2. Exclude manually locked records.
+3. Collect available classification signals.
+4. Apply deterministic rules.
+5. Assign high-confidence categories.
+6. Store explanations and confidence.
+7. Add uncertain bookmarks to the review queue.
+8. Preserve source-folder provenance.
+9. Update category counts.
+
+If the owner selected an explicit destination category during import, that assignment must take precedence and must not be replaced by automatic classification.
+
+Do not reclassify duplicate existing bookmarks automatically.
+
+Classification failures must not undo otherwise successfully saved bookmarks.
+
+Keep processing bounded. For larger imports, use safe batch processing or the existing resumable job mechanism rather than an unbounded HTTP request.
+
+Do not introduce additional paid infrastructure.
+
+# 13. CLASSIFY ALREADY IMPORTED BOOKMARKS
+
+Existing bookmarks imported in Phase 2 may currently be Uncategorized.
+
+Provide a basic action:
+
+**Classify Uncategorized Bookmarks**
+
+This action should:
+
+- Identify eligible, unlocked bookmarks.
+- Collect existing available signals.
+- Calculate category suggestions.
+- Show a brief impact preview.
+- Allow owner confirmation.
+- Apply high-confidence decisions.
+- Add uncertain records to review.
+- Preserve existing manually assigned categories.
+- Report actual counts.
+
+Do not automatically reclassify the entire database on page load.
+
+Do not silently rewrite already categorized records.
+
+For broader reclassification following rule changes, require an explicit preview and owner confirmation.
+
+# 14. MANUAL REVIEW QUEUE
+
+Create a simple authenticated route:
+
+`/classification/review`
+
+Follow the existing dashboard design.
+
+### Review Page
+
+Show bookmarks requiring manual review.
+
+Each item should display:
+
+- Bookmark title.
+- Domain.
+- Existing category, if any.
+- Suggested category.
+- Suggested subcategory.
+- Confidence.
+- Short explanation.
+- Original import folder path, when available.
+- Category selection control.
+
+### Review Actions
+
+Allow:
+
+- Accept suggestion.
+- Choose another category.
+- Choose another subcategory.
+- Keep Uncategorized.
+- Mark reviewed without changing placement when appropriate.
+
+Accepting or correcting a category must create a persistent manual assignment/lock for that bookmark.
+
+Do not automatically transform every correction into a domain-wide rule.
+
+### Review Counts
+
+Display actual counts for:
+
+- Pending review.
+- Automatically categorized.
+- Manually categorized.
+- Uncategorized.
+
+Keep the interface paginated for large libraries.
+
+# 15. MANUAL CORRECTIONS AND RULE LEARNING
+
+When the owner manually changes a bookmark category, offer two distinct options:
+
+**Option A — Only This Bookmark**
+
+- Save the new primary category.
+- Apply a manual lock.
+- Do not affect other bookmarks.
+
+**Option B — Create a Reusable Rule**
+
+- Allow the owner to choose the exact URL, path pattern or hostname scope.
+- Preview how many existing bookmarks match.
+- Show potential category conflicts.
+- Exclude manually locked bookmarks from automatic changes.
+- Require explicit confirmation.
+- Save a versioned owner-defined rule.
+
+Example:
+
+The owner changes a specific YouTube React tutorial to:
+
+`Development & Programming → Coding Education & Examples`
+
+This must not automatically reclassify every YouTube bookmark.
+
+A reusable domain-wide rule must be created only when the owner explicitly authorizes it.
+
+## Rule Management UI
+
+Provide a basic rules interface under Categories or Classification Settings.
+
+Support:
+
+- View rules.
+- Enable/disable rules.
+- Create a rule.
+- Edit a rule.
+- Delete an owner-defined rule.
+- See rule scope and target category.
+- Preview affected bookmarks before broad application.
+
+Avoid building a complex visual automation editor.
+
+Never evaluate arbitrary JavaScript from user-defined rules.
+
+Use validated, structured rule definitions.
+
+# 16. TAGS — BASIC SUPPORT
+
+Categorization and tagging are different.
+
+A bookmark should normally have one primary category path but may have multiple descriptive tags.
+
+Example:
+
+`https://youtube.com/watch?v=react123`
+
+Primary Category:
+
+`Development & Programming → Coding Education & Examples`
+
+Tags:
+
+- React
+- JavaScript
+- Tutorial
+- Video
+- YouTube
+
+Implement or extend basic tags using the existing Neon database.
+
+Requirements:
+
+- Many-to-many bookmark/tag relationships.
+- Add/remove tags manually.
+- Suggest tags from explicit deterministic keyword/rule matches.
+- Avoid duplicate tag names caused only by case or harmless whitespace variation.
+- Preserve manually added tags.
+- Do not remove manual tags during reclassification.
+- Do not generate excessive low-confidence tags.
+
+Keep advanced tag management and filtering improvements for Phase 4.
+
+# 17. CATEGORY MANAGEMENT
+
+Integrate the 18/83 taxonomy into the existing Categories page.
+
+Show:
+
+- Main category names.
+- Nested subcategories.
+- Actual bookmark counts.
+- Uncategorized count.
+- Pending review count.
+
+Allow the owner to:
+
+- Select categories.
+- View associated bookmarks.
+- Manually move a bookmark.
+- Create a custom category/subcategory where supported.
+- Rename categories without changing stable IDs.
+
+If category CRUD already exists in Phase 1, reuse it.
+
+Do not rebuild the category interface unnecessarily.
+
+Do not implement advanced category merges, drag-and-drop reordering or bulk hierarchy restructuring unless these already exist.
+
+A future phase may refine those interactions.
+
+# 18. CLASSIFICATION EXPLANATIONS
+
+Automatic classification must be explainable.
+
+Example:
+
+```text
+Bookmark: Example Cloud Hosting
+
+Category:
+Cloud & Infrastructure
+
+Subcategory:
+Hosting & PaaS
+
+Classification:
+Rule-Based Automatic
+
+Confidence:
+High
+
+Reason:
+- Matched approved hosting folder mapping.
+- Matched hosting-related title phrase.
+- Matched relevant hostname rule.
+```
+
+Do not display fabricated reasoning.
+
+Evidence must correspond to actual rules evaluated by the engine.
+
+Show compact explanations in bookmark details and review interfaces.
+
+Avoid overwhelming the main card grid with debugging information.
+
+# 19. RULE VERSIONING
+
+Rules may change as the owner improves classification quality.
+
+Store sufficient information to identify:
+
+- Rule ID.
+- Rule revision.
+- Ruleset version.
+- Decision timestamp.
+- Classification source.
+- Manual lock status.
+
+Changing rules must not automatically rewrite existing manual assignments.
+
+When a broad rule changes, allow an impact preview before applying it to existing records.
+
+Keep the initial implementation simple but retain traceability.
+
+# 20. PERFORMANCE AND LARGE LIBRARIES
+
+The owner previously had approximately 7,485 raw bookmark occurrences across two browser exports.
+
+The application must support categorizing thousands of existing bookmarks without loading the entire library into one client-side component.
+
+Use:
+
+- Database pagination.
+- Bounded processing batches.
+- Indexed lookup fields.
+- Reusable pure TypeScript services.
+- Efficient database writes.
+- Clear progress and error feedback.
+
+Avoid:
+
+- Unbounded parallel database requests.
+- Repeated full-table scans for every rule.
+- Long-running blocking UI operations.
+- Reclassifying every bookmark on every page load.
+- Unnecessary third-party dependencies.
+
+No performance benchmarking or load-testing campaign is required in this basic MVP phase.
+
+# 21. SECURITY AND PRIVACY
+
+Maintain existing single-owner access restrictions.
+
+Every categorization endpoint and database operation must verify the authorized owner.
+
+Additional requirements:
+
+- Do not send private URLs to external AI services.
+- Do not fetch websites during classification.
+- Do not execute imported HTML.
+- Do not execute owner-supplied rule text as code.
+- Validate rule patterns and target category IDs.
+- Avoid unsafe or unbounded regular expressions.
+- Protect category and rule mutation endpoints.
+- Do not reveal personal URLs through logs.
+- Preserve sensitive/private bookmark visibility restrictions.
+
+Use only existing stored bookmark information.
+
+# 22. SUGGESTED ROUTES AND SERVICES
+
+Reuse existing routing conventions.
+
+Suggested application routes:
+
+```text
+/categories
+/classification/review
+/classification/rules
+```
+
+Suggested server-side operations:
+
+```text
+POST /api/v1/classification/preview
+POST /api/v1/classification/apply
+GET  /api/v1/classification/review
+POST /api/v1/classification/review/:bookmarkId/resolve
+
+GET  /api/v1/classification/rules
+POST /api/v1/classification/rules
+PATCH /api/v1/classification/rules/:id
+DELETE /api/v1/classification/rules/:id
+```
+
+Adapt these routes to existing API contracts and project conventions.
+
+Keep classification matching, scoring and decision persistence separate from route handlers.
+
+All preview/apply operations must validate owner authorization.
+
+Use idempotent or transactionally safe operations to avoid duplicate decisions on retries.
+
+# 23. UI/UX REQUIREMENTS
+
+Preserve the existing clean, professional, minimal dashboard.
+
+Add only necessary interfaces:
+
+1. Classification overview.
+2. Category/subcategory tree.
+3. Manual review queue.
+4. Simple classification rules management.
+5. Classification explanation in bookmark details.
+6. Classify Uncategorized action.
+
+Use existing Tailwind CSS and shadcn/ui patterns.
+
+Do not change:
+
+- Main dashboard visual identity.
+- Existing theme.
+- Global typography.
+- Authentication UI.
+- Bookmark card layout unnecessarily.
+- Import page design.
+
+Keep interfaces responsive and accessible.
+
+# 24. OUT OF SCOPE
+
+Do not implement:
+
+- AI/LLM classification.
+- Embeddings.
+- Vector databases.
+- Automatic website scraping.
+- Screenshot generation.
+- Open Graph fetching jobs.
+- Advanced full-text search.
+- Complex smart collections.
+- Project workspaces.
+- Browser extensions.
+- Browser synchronization.
+- HTML export.
+- JSON/ZIP backup or restore.
+- Link health checking.
+- Complex taxonomy visualization.
+- Comprehensive analytics dashboards.
+- Advanced drag-and-drop category management.
+- Production infrastructure migration.
+
+These belong to later phases.
+
+# 25. DEVELOPMENT RULES — BASIC MVP MODE
+
+I am currently building the basic functional application.
+
+Follow these instructions:
+
+1. Implement working functionality directly.
+2. Do not perform a comprehensive codebase audit.
+3. Do not generate automated unit-test suites.
+4. Do not generate integration or E2E test suites.
+5. Do not create performance or security audit reports.
+6. Do not produce extensive implementation documentation.
+7. Do not refactor unrelated application modules.
+8. Do not recreate Phase 1 or Phase 2 functionality.
+9. Do not change the approved database or authentication provider.
+10. Do not introduce unnecessary frameworks.
+11. Do not fabricate classification accuracy claims.
+12. Run essential TypeScript type-checking and application build verification only.
+13. Preserve database correctness, authorization and manual category locks.
+14. Keep implementation maintainable and easy to extend.
+15. Report any incomplete functionality explicitly.
+
+Reduced testing scope does not permit silent data loss, insecure routes or destructive category updates.
+
+# 26. GITHUB WORKFLOW
+
+If the project is connected to an authorized private GitHub repository:
+
+- Preserve existing Git history.
+- Commit only the intended Phase 3 changes.
+- Do not commit private HTML bookmark exports.
+- Do not commit database credentials.
+- Do not expose private user URLs in documentation or logs.
+- Push to the authorized working branch.
+- Report the actual branch and commit SHA.
+- Never force push.
+
+If no authorized remote is configured, keep changes locally and report the missing configuration.
+
+Do not deploy to production unless separately instructed.
+
+# 27. PHASE 3 COMPLETION CRITERIA
+
+Phase 3 is functionally complete when:
+
+- The initial 18 main categories exist.
+- All 83 initial named subcategories exist.
+- Taxonomy seeding is idempotent.
+- A deterministic TypeScript categorization engine exists.
+- Source folder mappings are supported.
+- URL/host/path rules are supported.
+- Title and keyword signals are supported.
+- Owner-defined rules are supported.
+- Manual category assignments always take priority.
+- Existing manual locks are preserved.
+- High-confidence new bookmarks can be automatically categorized.
+- Uncertain bookmarks enter a review queue.
+- Category suggestions have explainable evidence.
+- Manual review and correction work.
+- Owner-approved reusable rule creation works.
+- Existing uncategorized bookmarks can be classified after an explicit preview and confirmation.
+- Future imports use the categorization engine for eligible new bookmarks.
+- Existing canonical bookmark identities remain unchanged.
+- Original import folder provenance remains preserved.
+- The existing application builds successfully.
+
+Do not claim these are complete without actually implementing them.
+
+Formal automated testing and comprehensive audits are intentionally deferred.
+
+# 28. FINAL IMPLEMENTATION REPORT
+
+After completing Phase 3, provide a concise report with the following sections:
+
+### A. Implementation Summary
+Explain what was implemented.
+
+### B. Taxonomy
+State how many main categories and subcategories were actually seeded.
+
+### C. Classification Engine
+Explain the implemented rule types and precedence.
+
+### D. Manual Category Protection
+Explain how user-selected categories and manual locks are preserved.
+
+### E. Import Integration
+Describe how Phase 2 imports trigger classification for eligible new bookmarks.
+
+### F. Review Queue
+Explain how uncertain bookmarks can be reviewed.
+
+### G. Database Changes
+List relevant tables and migrations.
+
+### H. Files Changed
+List important created or modified files.
+
+### I. Build Status
+Report actual type-check/build results, without claiming formal tests or audits.
+
+### J. GitHub Status
+Provide branch, commit SHA and push result if applicable.
+
+### K. Known Limitations
+State any deferred functionality or incomplete integration.
+
+### L. Phase 4 Readiness
+Confirm readiness for Visual Bookmark Library, Advanced Search, Filtering, Favorites and category UI refinement.
+
+Do not begin Phase 4.
+
+---
+
+# FINAL EXECUTION INSTRUCTION
+
+Start implementing Phase 3 in the existing Personal Visual Bookmark Manager project.
+
+Prioritize:
+
+1. The exact initial 18/83 taxonomy.
+2. Deterministic non-AI classification.
+3. Strong manual category priority.
+4. Source-folder and URL-aware rules.
+5. Explainable confidence scoring.
+6. High-confidence automatic classification.
+7. Manual review for uncertain bookmarks.
+8. Safe integration with Phase 2 imports.
+9. Basic user-defined rules and correction flow.
+10. Preservation of existing data and full-URL identity.
+
+### NON-NEGOTIABLE REQUIREMENTS
+
+**NO AI APIs, NO LLMs, NO embeddings for categorization.**
+
+**USER-SELECTED CATEGORY ALWAYS HAS THE HIGHEST PRIORITY.**
+
+**MANUAL CATEGORY LOCKS MUST NEVER BE OVERRIDDEN BY AUTOMATION.**
+
+**FULL URL-BASED DUPLICATE DETECTION MUST REMAIN UNCHANGED.**
+
+**DIFFERENT PATHS OR QUERY VALUES ON THE SAME DOMAIN REMAIN DISTINCT BOOKMARKS.**
+
+**UNKNOWN OR AMBIGUOUS BOOKMARKS MUST GO TO MANUAL REVIEW RATHER THAN RECEIVE INVENTED CLASSIFICATIONS.**
+
+**DO NOT START PHASE 4.**
+
+Implement Phase 3 now and report the actual results.

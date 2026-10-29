@@ -5,7 +5,9 @@ import {
   ExternalLink,
   Lock,
   Pencil,
+  Sparkles,
   Star,
+  Tag,
   Trash2,
 } from 'lucide-react';
 import type { BookmarkRecord } from '@/types/bookmark';
@@ -51,6 +53,10 @@ export function BookmarkCard({
     : 'Uncategorized';
 
   const monogram = getDomainMonogram(bookmark.domain);
+  const autoConfidencePct = bookmark.latestDecision
+    ? Math.round(bookmark.latestDecision.confidence * 100)
+    : null;
+  const tagsList = bookmark.tags ?? [];
 
   if (viewMode === 'list') {
     return (
@@ -70,7 +76,10 @@ export function BookmarkCard({
               </h3>
             </div>
 
-            <p className="font-mono text-xs text-slate-500 truncate" title={bookmark.originalUrl}>
+            <p
+              className="font-mono text-xs text-slate-500 truncate"
+              title={bookmark.originalUrl}
+            >
               {bookmark.originalUrl}
             </p>
 
@@ -82,15 +91,33 @@ export function BookmarkCard({
 
             <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs text-slate-500">
               <span className="font-medium text-slate-700">{categoryLabel}</span>
-              {bookmark.categoryLocked && (
+              {bookmark.categoryLocked ? (
                 <>
                   <span aria-hidden="true">·</span>
-                  <span className="inline-flex items-center gap-1 text-slate-600" title="Explicit owner selection locked against automatic reclassification">
+                  <span
+                    className="inline-flex items-center gap-1 text-slate-600"
+                    title="Explicit owner selection locked against automatic reclassification"
+                  >
                     <Lock className="h-3 w-3" aria-hidden="true" />
                     Manual lock
                   </span>
                 </>
-              )}
+              ) : bookmark.categorySource === 'auto' ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span
+                    className="inline-flex items-center gap-1 text-emerald-700"
+                    title={
+                      bookmark.latestDecision?.evidence?.[0] ||
+                      'Assigned by deterministic classification rule'
+                    }
+                  >
+                    <Sparkles className="h-3 w-3" aria-hidden="true" />
+                    Auto rule
+                    {autoConfidencePct !== null ? ` (${autoConfidencePct}%)` : ''}
+                  </span>
+                </>
+              ) : null}
               <span aria-hidden="true">·</span>
               <span className="font-mono text-slate-500">{bookmark.domain}</span>
               <span aria-hidden="true">·</span>
@@ -101,6 +128,15 @@ export function BookmarkCard({
                 {formatDate(bookmark.createdAt)}
               </time>
             </div>
+
+            {tagsList.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[11px] font-mono text-slate-500">
+                <Tag className="h-3 w-3 text-slate-400" />
+                {tagsList.map((t) => (
+                  <span key={t.id}>#{t.normalizedName}</span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -224,6 +260,15 @@ export function BookmarkCard({
             Note: {bookmark.notes}
           </p>
         )}
+
+        {tagsList.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-slate-500">
+            <Tag className="h-3 w-3 text-slate-400" />
+            {tagsList.map((t) => (
+              <span key={t.id}>#{t.normalizedName}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between gap-2">
@@ -231,7 +276,7 @@ export function BookmarkCard({
           <span className="font-medium text-slate-700 truncate">
             {categoryLabel}
           </span>
-          {bookmark.categoryLocked && (
+          {bookmark.categoryLocked ? (
             <>
               <span aria-hidden="true">·</span>
               <span
@@ -242,7 +287,22 @@ export function BookmarkCard({
                 Manual
               </span>
             </>
-          )}
+          ) : bookmark.categorySource === 'auto' ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span
+                className="inline-flex items-center gap-1 text-emerald-700"
+                title={
+                  bookmark.latestDecision?.evidence?.[0] ||
+                  'Assigned by deterministic classification rule'
+                }
+              >
+                <Sparkles className="h-3 w-3" aria-hidden="true" />
+                Auto
+                {autoConfidencePct !== null ? ` (${autoConfidencePct}%)` : ''}
+              </span>
+            </>
+          ) : null}
           <span aria-hidden="true">·</span>
           <time
             dateTime={bookmark.createdAt}

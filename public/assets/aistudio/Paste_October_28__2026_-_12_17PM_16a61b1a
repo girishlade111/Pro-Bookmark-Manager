@@ -1,0 +1,855 @@
+# PHASE 2 — PERSONAL VISUAL BOOKMARK MANAGER
+## Browser HTML Import, Full-URL Duplicate Detection & Import History
+
+### ROLE
+
+Act as a Senior Full-Stack Engineer, Next.js Developer, PostgreSQL Database Engineer, and Data Import Systems Architect.
+
+You are continuing development of an existing **Personal Visual Bookmark Manager** application.
+
+Phase 1 established the application foundation, authentication, Neon PostgreSQL, bookmark CRUD, basic categories, and URL identity handling.
+
+Your task is to **implement Phase 2 directly in the existing project**.
+
+Do not recreate the project, replace its technology stack, redesign its existing UI, or rebuild features that are already functioning.
+
+Focus on a reliable, simple, working import system suitable for a private single-owner MVP.
+
+---
+
+# 1. PRIMARY OBJECTIVE
+
+Develop a functional bookmark import system that allows the owner to upload browser-exported Netscape HTML bookmark files and import them into the existing Neon PostgreSQL database.
+
+The system must:
+
+1. Accept browser bookmark HTML files.
+2. Support selecting multiple HTML files.
+3. Parse bookmarks and nested source folders.
+4. Extract and preserve original bookmark information.
+5. Identify duplicates using normalized FULL URLs.
+6. Preserve different URLs from the same domain.
+7. Preview results before importing.
+8. Allow the owner to select a destination category.
+9. Respect existing manual category assignments.
+10. Save imported bookmarks in Neon PostgreSQL.
+11. Preserve import occurrences and original folder paths.
+12. Display import results and basic import history.
+13. Prevent duplicate canonical bookmarks during repeated imports.
+
+Do not implement AI classification, full export/backup functionality, or advanced metadata enrichment in this phase.
+
+# 2. READ EXISTING PROJECT FIRST
+
+Before modifying code:
+
+- Inspect the existing Next.js project structure.
+- Locate the existing bookmark CRUD services.
+- Locate the URL identity normalization service from Phase 1.
+- Inspect the existing Neon database schema.
+- Locate authentication and owner authorization logic.
+- Inspect existing category and placement tables.
+- Read relevant project documentation if available.
+
+Relevant files include:
+
+- `PRD.md`
+- `ARCHITECTURE.md`
+- `DATABASE_SCHEMA.md`
+- `DUPLICATE_DETECTION.md`
+- `IMPORT_EXPORT.md`
+- `API_CONTRACTS.md`
+- `SECURITY.md`
+- `docs/engines/DUPLICATE_DETECTION_ENGINE_GUIDE.md`
+- `docs/engines/IMPORT_EXPORT_ENGINE_GUIDE.md`
+
+Do not assume that a document exists unless it is present in the workspace.
+
+Reuse existing services rather than implementing contradictory versions.
+
+If Phase 1 has an incomplete dependency required for importing, fix only the minimum necessary part and report the change.
+
+# 3. BROWSER HTML FILE SUPPORT
+
+Support Netscape Bookmark HTML exported by common browsers:
+
+- Google Chrome.
+- Microsoft Edge.
+- Opera / Opera GX.
+- Brave.
+- Firefox.
+- Other browsers producing compatible Netscape Bookmark HTML.
+
+Accept:
+
+- `.html`
+- `.htm`
+
+Allow multiple HTML files to be selected and imported in one user workflow.
+
+Do not implement ZIP, arbitrary JSON, or browser-specific proprietary backup formats yet.
+
+Validate files using actual contents and structural checks, not extensions alone.
+
+## Expected Bookmark HTML
+
+The parser must understand standard structures containing:
+
+- `<DL>` — bookmark folder lists.
+- `<DT>` — bookmark/folder records.
+- `<H3>` — folder headings.
+- `<A HREF>` — bookmark URLs.
+- `ADD_DATE`
+- `LAST_MODIFIED`
+- Optional icon attributes.
+- HTML entities.
+- Unicode text.
+- Nested folder structures.
+
+Use a suitable maintained HTML parser.
+
+Do not rely on simplistic regular expressions to parse arbitrary nested HTML.
+
+Treat all imported HTML as untrusted data.
+
+Never execute imported scripts, inline event handlers, or HTML content.
+
+# 4. BOOKMARK DATA EXTRACTION
+
+For every valid bookmark occurrence, extract:
+
+- Original URL.
+- URL identity key.
+- Original bookmark title.
+- Display title.
+- Original nested folder path.
+- Source filename.
+- Source browser, if specified.
+- Source occurrence index/order.
+- Original creation timestamp, if available.
+- Original modification timestamp, if available.
+- Import batch ID.
+- Import timestamp.
+- Relevant parsing warnings.
+
+Example:
+
+Source folder structure:
+
+`Bookmarks bar / Development / React / Tutorials`
+
+Bookmark:
+
+`https://react.dev/learn`
+
+Preserve the original folder path as structured data:
+
+```json
+{
+  "folderPath": [
+    "Bookmarks bar",
+    "Development",
+    "React",
+    "Tutorials"
+  ]
+}
+```
+
+Do not flatten nested folders into a single ambiguous string.
+
+Do not treat generic browser containers such as `Bookmarks bar`, `Favorites bar`, `Other Bookmarks`, or `Mobile Bookmarks` as automatically inferred topical categories.
+
+Preserve source folder information separately from the application's category assignment.
+
+## Missing Titles
+
+A bookmark with an empty title is still valid if its URL is valid.
+
+For example:
+
+```html
+<A HREF="https://example.com"></A>
+```
+
+The application should:
+
+- Keep the original title as an empty string in source occurrence metadata.
+- Generate a readable display fallback from the hostname or URL path.
+- Allow the owner to edit the title later.
+
+Do not discard valid bookmarks because they have missing titles.
+
+# 5. ABSOLUTE RULE — FULL-URL DUPLICATE DETECTION
+
+This is the most important requirement.
+
+**Never use hostname-only or domain-only duplicate detection.**
+
+A bookmark's identity depends on its conservatively normalized full URL.
+
+Examples:
+
+| URL A | URL B | Result |
+|---|---|---|
+| `https://youtube.com` | `https://youtube.com/` | Duplicate |
+| `https://youtube.com/` | `https://youtube.com/watch?v=123` | Different |
+| `https://youtube.com/watch?v=123` | `https://youtube.com/watch?v=456` | Different |
+| `https://github.com/user/repo1` | `https://github.com/user/repo2` | Different |
+| `https://example.com/page?id=1` | `https://example.com/page?id=2` | Different |
+| `https://example.com/a` | `https://example.com/a/` | Different by default |
+| `https://example.com/p#one` | `https://example.com/p#two` | Different by default |
+
+## Normalization Requirements
+
+Reuse the approved Phase 1 URL normalization implementation.
+
+Allow conservative normalization such as:
+
+- Trimming surrounding whitespace.
+- Standard hostname and scheme case normalization.
+- Empty root path and `/` equivalence.
+- Equivalent default-port handling.
+
+Never automatically:
+
+- Strip query parameters.
+- Strip UTM parameters.
+- Sort query parameters.
+- Remove fragments.
+- Ignore non-root trailing slashes.
+- Convert HTTP to HTTPS.
+- Merge `www` and non-`www` hostnames.
+- Merge different URL paths.
+- Collapse redirect destinations.
+
+Original URLs must be preserved independently of their identity keys.
+
+If Phase 1 normalization violates these requirements, correct it without changing unrelated code.
+
+Use the existing database uniqueness constraint for owner-scoped URL identity.
+
+The database constraint, not a client-side duplicate check, must prevent concurrent canonical duplicates.
+
+# 6. DUPLICATE RECONCILIATION
+
+Implement duplicate reconciliation against:
+
+1. Other entries in the same uploaded file.
+2. Entries in other files in the current upload.
+3. Canonical bookmarks already stored in Neon.
+
+Example:
+
+First imported HTML:
+
+```text
+https://github.com/user/repo
+https://youtube.com/watch?v=abc
+```
+
+Second imported HTML:
+
+```text
+https://github.com/user/repo
+https://youtube.com/watch?v=xyz
+```
+
+Result:
+
+- Existing GitHub URL: duplicate canonical identity.
+- Existing YouTube video ABC: retained.
+- New YouTube video XYZ: inserted.
+- Both files' source occurrences: preserved.
+
+The final canonical library has three bookmarks, not four.
+
+### Duplicate Handling Rules
+
+When a duplicate full URL is detected:
+
+- Do not insert another canonical bookmark.
+- Link the imported occurrence to the existing bookmark.
+- Preserve the incoming original title and folder path in occurrence history.
+- Preserve the existing bookmark's user-edited title.
+- Preserve its notes and favorite status.
+- Preserve its manually selected category.
+- Preserve category locks.
+- Never silently overwrite user changes.
+
+A repeated file import must not increase the canonical bookmark count.
+
+However, an explicitly repeated import may have its own import-history record and source occurrences.
+
+Use an idempotency key per commit operation and occurrence indexes to prevent accidental duplication caused by retries.
+
+Do not use the source file checksum alone to discard all future import history.
+
+# 7. DATABASE CHANGES
+
+Extend the existing Neon PostgreSQL schema.
+
+Do not recreate existing bookmark or category tables.
+
+Introduce or reuse appropriately named tables such as:
+
+## import_jobs
+
+Store:
+
+- ID.
+- Owner ID.
+- Original filename.
+- Source browser label.
+- SHA-256 file hash.
+- Import status.
+- Identity normalization version.
+- Total parsed entries.
+- New canonical bookmarks.
+- Exact duplicates.
+- Invalid records.
+- Warning count.
+- Created timestamp.
+- Completed timestamp.
+- Idempotency key.
+
+## import_occurrences
+
+Store:
+
+- ID.
+- Owner ID.
+- Import job ID.
+- Canonical bookmark ID.
+- Occurrence index.
+- Original URL.
+- Original title.
+- Original nested folder path.
+- Original date metadata.
+- Source browser.
+- Source order.
+
+Enforce appropriate owner-scoped foreign-key integrity.
+
+Ensure `(import_job_id, occurrence_index)` is unique.
+
+Preserve provenance for duplicate canonical bookmarks.
+
+If supporting empty folders is feasible within the existing schema, preserve them as source-folder nodes. Otherwise, clearly state that empty-folder reconstruction is deferred; never claim full source-folder fidelity when only bookmark paths were stored.
+
+All database changes must be additive, using proper migrations.
+
+Do not delete or recreate existing user data.
+
+# 8. IMPORT PAGE UI
+
+Create a new authenticated page:
+
+`/imports`
+
+Follow the existing dashboard styling and layout.
+
+Add an `Import Bookmarks` navigation item to the existing sidebar.
+
+## Upload Interface
+
+Display:
+
+- Page title: Import Bookmarks.
+- File selection area.
+- Drag-and-drop support where practical.
+- Multiple-file selection.
+- Selected filenames.
+- File sizes.
+- Optional source-browser selector.
+- Optional destination category selector.
+- Preview Import button.
+
+The interface should look consistent with the Phase 1 dashboard.
+
+Do not introduce a competing design system.
+
+## Destination Category Selection
+
+Allow:
+
+- No manual destination category.
+- Existing main category.
+- Existing subcategory.
+
+When the owner explicitly selects a destination category, it must be applied to newly imported bookmarks and saved as a manual assignment.
+
+If no category is selected and no approved mapping already exists, place new bookmarks in `Uncategorized`.
+
+Original folder paths must still be saved for future Phase 3 classification.
+
+Do not implement the rule-based categorization engine now.
+
+# 9. IMPORT PREVIEW — REQUIRED
+
+**Uploading a file must not immediately insert canonical bookmarks.**
+
+Build a preview-before-confirm workflow.
+
+After selecting files, show an import summary.
+
+Example layout:
+
+```text
+IMPORT PREVIEW
+
+Files selected:              2
+Total bookmark entries:  7,485
+New unique URLs:         Calculated
+Exact duplicates:        Calculated
+Invalid URLs:            Calculated
+Missing titles:          Calculated
+Category conflicts:      Calculated
+
+[Cancel]  [Confirm Import]
+```
+
+These numbers are illustrative. Calculate actual values from the uploaded content and the current database.
+
+Do not hardcode the historical bookmark counts.
+
+### Preview Details
+
+Show:
+
+- Selected filenames.
+- Total source bookmark entries.
+- Unique full-URL identities within the upload.
+- Duplicate occurrences within the upload.
+- Duplicates against existing bookmarks.
+- New canonical bookmarks to insert.
+- Invalid or unsupported URLs.
+- Missing titles.
+- Existing category conflicts.
+- Selected destination category.
+
+If practical, provide a compact table displaying sample imported bookmarks and their statuses:
+
+- New.
+- Duplicate.
+- Invalid.
+- Category conflict.
+
+Keep large previews paginated or limited to avoid rendering thousands of rows.
+
+### Preview Safety
+
+The preview must not modify canonical bookmarks or category placements.
+
+It may create a temporary, owner-scoped import job or staging record.
+
+Bind confirmation to an authenticated preview token, file checksum, and relevant database/ruleset version.
+
+Do not trust a client-provided summary of new or duplicate bookmarks.
+
+Revalidate the file or trusted staged content before committing.
+
+Expired or stale previews must require a new preview.
+
+# 10. CATEGORY CONFLICT RESOLUTION
+
+Consider this scenario:
+
+An existing bookmark:
+
+`https://youtube.com/watch?v=react123`
+
+Current category:
+
+`Development / Tutorials`
+
+The owner previously selected that category manually.
+
+A new HTML file contains the same full URL under:
+
+`Entertainment / Videos`
+
+Do not move it automatically.
+
+### Default Conflict Behavior
+
+**Keep existing category.**
+
+For the basic UI, provide these options where supported:
+
+1. Keep Existing Category — default.
+2. Move to Selected Category — only after explicit owner confirmation.
+3. Add Secondary Folder Reference — only if supported by the existing placement model.
+
+If secondary placements are not implemented yet, do not simulate them by cloning a canonical bookmark.
+
+When the owner selected a global import destination category, apply it automatically only to genuinely new bookmarks.
+
+Existing canonical bookmarks require explicit conflict resolution before changing categories.
+
+A manual category lock cannot be overwritten by import heuristics or source-folder matching.
+
+# 11. IMPORT CONFIRMATION & DATABASE WRITES
+
+After the owner clicks `Confirm Import`:
+
+1. Verify the authenticated owner.
+2. Validate the preview token and file hash.
+3. Parse or retrieve validated staged entries.
+4. Normalize URLs using the shared identity service.
+5. Reconcile each canonical identity against Neon.
+6. Insert genuinely new canonical bookmarks.
+7. Link duplicate occurrences to existing bookmarks.
+8. Apply explicitly selected categories to new records.
+9. Save source occurrence metadata.
+10. Update import-job statistics.
+11. Show the resulting import summary.
+
+Use database transactions and conflict-aware inserts/upserts.
+
+Do not use a separate in-memory uniqueness map as the only deduplication safeguard.
+
+Never allow two concurrent imports to create two canonical bookmarks with the same identity.
+
+### Large File Handling
+
+The owner has previously provided exports containing approximately 7,485 raw bookmark entries in total.
+
+Build the workflow so it can reasonably handle thousands of entries without freezing the UI.
+
+Use:
+
+- Bounded database insert batches.
+- Import checkpoints when necessary.
+- Chunk-based writes or resumable operations where appropriate.
+- Clear loading/progress states.
+- Retry-safe commit behavior.
+
+Do not rely on a long-running, fragile serverless request that assumes unlimited execution time.
+
+Avoid adding Redis, external job queues, or separate worker infrastructure for this basic version unless absolutely required.
+
+Do not introduce background metadata fetching during import.
+
+### Failure Behavior
+
+An interrupted import must not silently lose provenance or create duplicate canonical records on retry.
+
+Record failures honestly.
+
+If some chunks have committed, report the actual partial state and allow a safe resume.
+
+Do not falsely report a failed or partially committed import as fully rolled back.
+
+# 12. IMPORT RESULTS
+
+After the import finishes, show:
+
+```text
+IMPORT COMPLETED
+
+Files processed:       Actual value
+Total entries:         Actual value
+New bookmarks:         Actual value
+Exact duplicates:      Actual value
+Invalid entries:       Actual value
+Category conflicts:    Actual value
+
+[View Bookmarks]  [Import Another File]
+```
+
+All statistics must come from the real import process.
+
+Provide understandable messages for:
+
+- Unsupported files.
+- Empty files.
+- Invalid URLs.
+- Duplicate-only imports.
+- Missing titles.
+- Failed database operations.
+- Stale previews.
+- Interrupted imports.
+
+Do not expose raw private URLs in public logs.
+
+# 13. BASIC IMPORT HISTORY
+
+Add an Import History section to the Imports page.
+
+Display:
+
+- Filename.
+- Source browser.
+- Import date.
+- Status.
+- Total entries.
+- New bookmarks.
+- Duplicate occurrences.
+- Invalid entries.
+
+Allow the owner to view a basic per-import summary.
+
+Use server-side owner authorization for all history queries.
+
+Do not implement a complex audit dashboard, analytics engine, or full import undo interface now.
+
+Preserve enough provenance and job information to support safe undo in a future phase.
+
+Do not add a fake Undo button that cannot reliably reverse changes.
+
+# 14. SECURITY REQUIREMENTS
+
+This remains a private single-owner application.
+
+Apply existing server-side owner authorization to:
+
+- Import preview.
+- Import confirmation.
+- Import status.
+- Import history.
+- Staged import data.
+- Database writes.
+
+The import system must:
+
+- Reject unsafe schemes such as `javascript:`.
+- Validate actual file contents.
+- Enforce configurable file-size and entry limits.
+- Enforce folder-depth limits.
+- Reject malformed input that cannot be safely recovered.
+- Never execute imported HTML.
+- Never insert unsanitized HTML into the interface.
+- Never automatically visit imported URLs.
+- Never transmit the owner's bookmark library to AI APIs.
+- Never expose private file contents through unauthenticated endpoints.
+- Never trust client-supplied owner IDs.
+
+Use reasonable initial limits for a personal MVP, for example:
+
+- Maximum 25 MB per HTML file.
+- Maximum 100,000 entries per file.
+- Maximum nested-folder depth of 64.
+
+These are configurable starting limits, not claims about actual Vercel or Neon plan quotas.
+
+Reject files gracefully when limits are exceeded.
+
+Browser exports may contain private links, access tokens inside URLs, or embedded favicons. Avoid logging these contents and do not render unvalidated embedded image payloads.
+
+# 15. API IMPLEMENTATION
+
+Use the existing Next.js server-side architecture.
+
+The following endpoints are suggested where compatible with Phase 1:
+
+```text
+POST /api/v1/imports/preview
+POST /api/v1/imports/:id/commit
+GET  /api/v1/imports
+GET  /api/v1/imports/:id
+```
+
+Use route handlers, server actions, or a compatible combination as appropriate.
+
+All operations must call the existing server-side owner authorization service.
+
+Use shared domain services for parsing, URL normalization, duplicate reconciliation, import persistence, and statistics.
+
+Do not copy critical identity logic into UI components.
+
+Keep API responses consistent with `API_CONTRACTS.md` when available.
+
+# 16. IMPORT STATISTICS ACCURACY
+
+Distinguish between:
+
+- Raw source occurrences.
+- Unique URL identities in the upload.
+- Duplicate occurrences inside the upload.
+- Existing database duplicates.
+- New canonical bookmarks inserted.
+- Invalid URLs.
+
+For multi-file uploads, count each source occurrence correctly while avoiding double-counting canonical insertions.
+
+Do not treat source occurrences as new canonical bookmarks.
+
+Do not claim that two historical raw bookmark files necessarily contain a specific number of normalized unique identities until the actual selected normalization rules have been applied.
+
+# 17. UI/UX GUIDELINES
+
+Maintain the existing clean, minimal design.
+
+The Import page should provide a simple workflow:
+
+**Select Files → Preview → Resolve Conflicts → Confirm → Results**
+
+Requirements:
+
+- Clear status indicators.
+- Responsive mobile layout.
+- Accessible form controls.
+- Good error messages.
+- Progress feedback.
+- No automatic committing.
+- No unnecessary modal complexity.
+- No rendering of thousands of cards simultaneously.
+
+Use existing shadcn/ui components wherever appropriate.
+
+Do not redesign the application header, main dashboard, sidebar theme, typography, or existing bookmarks page without a direct functional requirement.
+
+# 18. FEATURES NOT TO IMPLEMENT
+
+Do not implement:
+
+- AI Categorization.
+- LLM integration.
+- Keyword scoring engine.
+- Automated domain classification.
+- The complete 18/83 taxonomy.
+- Automatic category creation from every source folder.
+- Tag recommendation.
+- Remote metadata scraping.
+- OG-image fetching.
+- Website screenshots.
+- Link health checker.
+- Browser extension.
+- Real-time browser synchronization.
+- HTML export.
+- JSON/ZIP backup and restore.
+- ZIP import.
+- Advanced audit history.
+- Complex import rollback UI.
+- Import scheduling.
+- Advanced Smart Collections.
+- Project Workspaces.
+- Production deployment changes unrelated to this phase.
+
+These belong to later phases.
+
+# 19. DEVELOPMENT RULES — FAST MVP MODE
+
+I am currently building only the basic functional version.
+
+Follow these rules:
+
+1. Do not conduct full repository audits.
+2. Do not run performance audits.
+3. Do not create automated unit-test suites.
+4. Do not create integration or E2E test suites.
+5. Do not create extensive audit reports.
+6. Do not create unrelated documentation.
+7. Do not perform unnecessary refactoring.
+8. Do not modify unrelated Phase 1 functionality.
+9. Do not replace existing authentication or database providers.
+10. Do not introduce mock import data as a substitute for real persistence.
+11. Do not claim formal testing has been completed.
+12. Run only essential compilation/type-check and build commands to catch obvious implementation errors.
+13. Maintain data integrity, authorization, validation and transactional safeguards despite the reduced testing scope.
+14. Keep the implementation understandable and maintainable.
+
+Do not introduce fake success messages or hardcoded sample counts.
+
+# 20. GITHUB WORKFLOW
+
+If the existing repository has an authorized private GitHub remote:
+
+- Preserve current project history.
+- Implement only Phase 2 changes.
+- Commit the completed changes.
+- Push to the authorized working branch.
+- Report the commit SHA and push result.
+- Never commit real bookmark export files.
+- Never commit database credentials or OAuth secrets.
+- Never force push.
+- Never push private bookmarks to a public repository.
+
+If the remote or authorization is missing, report the blocker and keep the changes local.
+
+# 21. PHASE 2 COMPLETION CRITERIA
+
+Phase 2 is functionally complete when:
+
+- The Imports page exists.
+- HTML files can be selected.
+- Multiple HTML files are supported.
+- Netscape bookmark structures are parsed.
+- Nested source folder paths are preserved.
+- Preview appears before confirmation.
+- Full-URL duplicate detection is used.
+- Same-domain different-path bookmarks remain independent.
+- Existing manual categories are preserved.
+- New bookmarks are inserted into Neon.
+- Duplicate occurrences reference their canonical bookmark.
+- Basic import results are displayed.
+- Import history is stored and viewable.
+- A repeated import does not multiply canonical bookmark identities.
+- The existing Bookmark Dashboard displays newly imported bookmarks.
+- The Next.js application compiles successfully.
+
+Do not mark incomplete features as completed.
+
+Formal audit and automated testing are intentionally deferred.
+
+# 22. FINAL RESPONSE FORMAT
+
+After implementation, provide a concise report containing:
+
+### A. Phase 2 Implementation Summary
+Explain what was actually built.
+
+### B. Completed Features
+List working import capabilities.
+
+### C. Database Changes
+List new or modified tables and migrations.
+
+### D. Files Changed
+List important created or modified source files.
+
+### E. Import Flow
+Explain how the owner uploads, previews and confirms bookmarks.
+
+### F. Build Status
+Report the actual build/type-check result. State that formal tests and audits were skipped.
+
+### G. GitHub Status
+Report branch, commit SHA and push result if applicable.
+
+### H. Known Limitations
+Describe any missing capability or unverified behavior, especially large-import handling, cancellation and rollback.
+
+### I. Phase 3 Readiness
+Confirm whether the stored import provenance and category assignments can be used by the future deterministic categorization engine.
+
+Do not start implementing Phase 3.
+
+---
+
+# FINAL EXECUTION INSTRUCTION
+
+Start implementing Phase 2 in the current application.
+
+Prioritize:
+
+1. Functional HTML parsing.
+2. Correct full-URL duplicate reconciliation.
+3. Original folder provenance.
+4. Explicit import preview.
+5. Owner-selected category protection.
+6. Reliable Neon persistence.
+7. Simple responsive import UI.
+8. Basic import history.
+
+**Never merge bookmarks using domain-only identity.**
+
+**Never silently overwrite manually selected categories.**
+
+**Never use AI or LLM services for categorization.**
+
+**Never execute imported HTML.**
+
+**Never import canonical bookmarks without owner confirmation.**
+
+Complete Phase 2 only and report the actual results.

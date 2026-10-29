@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
       notes: parsed.data.notes || null,
       categoryId: parsed.data.categoryId || null,
       isFavorite: parsed.data.isFavorite ?? false,
+      tags: parsed.data.tags,
     });
 
     return NextResponse.json({ bookmark: created }, { status: 201 });

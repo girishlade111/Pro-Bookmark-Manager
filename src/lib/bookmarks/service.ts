@@ -1,8 +1,15 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '../../db/index.ts';
-import { bookmarkPlacements, bookmarks, categories } from '../../db/schema.ts';
 import {
-  fallbackCreateCategory,
+  bookmarkPlacements,
+  bookmarkTags,
+  bookmarks,
+  categories,
+  classificationDecisions,
+  importOccurrences,
+  tags,
+} from '../../db/schema.ts';
+import {
   fallbackDeleteBookmark,
   fallbackEnsureSeeded,
   fallbackFindByNormalizedKey,
@@ -14,8 +21,19 @@ import {
 import type {
   BookmarkRecord,
   CategoryAssignmentSource,
+  ClassificationDecisionSummary,
+  ClassificationRuleType,
   DashboardSummary,
+  TagRecord,
 } from '../../types/bookmark.ts';
+import {
+  applyClassifyUncategorizedForOwner,
+  autoClassifyBookmarksBatchForOwner,
+  createClassificationRuleForOwner,
+  ensureInitialTaxonomyForOwner,
+  recordManualClassificationForOwner,
+  syncBookmarkTagsForOwner,
+} from '../classification/classification-service.ts';
 import {
   InvalidBookmarkUrlError,
   normalizeBookmarkUrl,
@@ -62,7 +80,8 @@ const STARTER_BOOKMARKS = [
       'Official documentation for nested layouts, server components, and route handlers.',
     notes: 'Primary reference for Phase 1 application shell and API route design.',
     isFavorite: true,
-    catKey: 'fe' as const,
+    mainCategoryName: 'Programming & Software Development',
+    subcategoryName: 'Web Development',
   },
   {
     url: 'https://orm.drizzle.team/docs/overview',
@@ -71,7 +90,8 @@ const STARTER_BOOKMARKS = [
       'Type-safe SQL query builder and schema migration toolkit for PostgreSQL.',
     notes: 'Used with parameterized queries and partial unique indexes.',
     isFavorite: true,
-    catKey: 'db' as const,
+    mainCategoryName: 'Programming & Software Development',
+    subcategoryName: 'Backend, APIs & Databases',
   },
   {
     url: 'https://orm.drizzle.team/docs/indexes-constraints',
@@ -80,7 +100,8 @@ const STARTER_BOOKMARKS = [
       'Same domain as Drizzle overview, distinct full URL path — preserved as a separate canonical bookmark.',
     notes: 'Demonstrates conservative full-URL identity (never domain-only deduplication).',
     isFavorite: false,
-    catKey: 'db' as const,
+    mainCategoryName: 'Programming & Software Development',
+    subcategoryName: 'Backend, APIs & Databases',
   },
   {
     url: 'https://url.spec.whatwg.org/',
@@ -89,43 +110,40 @@ const STARTER_BOOKMARKS = [
       'Specification for URL parsing, host canonicalization, and path normalization.',
     notes: 'Reference for conservative URL identity normalization rules.',
     isFavorite: false,
-    catKey: 'research' as const,
+    mainCategoryName: 'Documents, Files & Utilities',
+    subcategoryName: 'Technical Specifications & Standards',
   },
 ];
 
 export async function ensureOwnerSeedData(ownerId: string): Promise<void> {
+  // Always ensure the 18 main categories and 83 subcategories exist idempotently
+  await ensureInitialTaxonomyForOwner(ownerId);
+
   if (!process.env.SQL_HOST) {
     fallbackEnsureSeeded(ownerId, () => {
-      const engCat = fallbackCreateCategory(ownerId, {
-        name: 'Engineering',
-        parentCategoryId: null,
-        sortOrder: 0,
-      });
-      const feSubCat = fallbackCreateCategory(ownerId, {
-        name: 'Frontend & Next.js',
-        parentCategoryId: engCat.id,
-        sortOrder: 1,
-      });
-      const dbSubCat = fallbackCreateCategory(ownerId, {
-        name: 'Database & SQL',
-        parentCategoryId: engCat.id,
-        sortOrder: 2,
-      });
-      const researchCat = fallbackCreateCategory(ownerId, {
-        name: 'Research & Reading',
-        parentCategoryId: null,
-        sortOrder: 3,
-      });
-
-      const catLookup = {
-        fe: feSubCat.id,
-        db: dbSubCat.id,
-        research: researchCat.id,
+      const ownerCats = fallbackGetCategories(ownerId);
+      const findSubOrMainId = (mainName: string, subName: string) => {
+        const main = ownerCats.find(
+          (c) =>
+            !c.parentCategoryId &&
+            c.name.toLowerCase() === mainName.toLowerCase()
+        );
+        if (!main) return null;
+        const sub = ownerCats.find(
+          (c) =>
+            c.parentCategoryId === main.id &&
+            c.name.toLowerCase() === subName.toLowerCase()
+        );
+        return sub ? sub.id : main.id;
       };
 
       for (const item of STARTER_BOOKMARKS) {
         const normalized = normalizeBookmarkUrl(item.url);
-        const assignment = resolveCategoryAssignment(catLookup[item.catKey]);
+        const targetCatId = findSubOrMainId(
+          item.mainCategoryName,
+          item.subcategoryName
+        );
+        const assignment = resolveCategoryAssignment(targetCatId);
         fallbackInsertBookmark(ownerId, {
           originalUrl: normalized.originalUrl,
           normalizedUrlKey: normalized.normalizedUrlKey,
@@ -149,74 +167,45 @@ export async function ensureOwnerSeedData(ownerId: string): Promise<void> {
   }
 
   try {
-    const [existingCats, existingBookmarks] = await Promise.all([
-      db
-        .select({ id: categories.id })
-        .from(categories)
-        .where(eq(categories.ownerId, ownerId))
-        .limit(1),
-      db
-        .select({ id: bookmarks.id })
-        .from(bookmarks)
-        .where(eq(bookmarks.ownerId, ownerId))
-        .limit(1),
-    ]);
+    const existingBookmarks = await db
+      .select({ id: bookmarks.id })
+      .from(bookmarks)
+      .where(eq(bookmarks.ownerId, ownerId))
+      .limit(1);
 
-    if (existingCats.length > 0 || existingBookmarks.length > 0) {
+    if (existingBookmarks.length > 0) {
       seededSet.add(ownerId);
       return;
     }
 
+    const catRows = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.ownerId, ownerId));
+
+    const findSubOrMainId = (mainName: string, subName: string) => {
+      const main = catRows.find(
+        (c) =>
+          !c.parentCategoryId &&
+          c.name.toLowerCase() === mainName.toLowerCase()
+      );
+      if (!main) return null;
+      const sub = catRows.find(
+        (c) =>
+          c.parentCategoryId === main.id &&
+          c.name.toLowerCase() === subName.toLowerCase()
+      );
+      return sub ? sub.id : main.id;
+    };
+
     await db.transaction(async (tx) => {
-      const [engCat] = await tx
-        .insert(categories)
-        .values({
-          ownerId,
-          name: 'Engineering',
-          parentCategoryId: null,
-          sortOrder: 0,
-        })
-        .returning();
-
-      const [feSubCat] = await tx
-        .insert(categories)
-        .values({
-          ownerId,
-          name: 'Frontend & Next.js',
-          parentCategoryId: engCat.id,
-          sortOrder: 1,
-        })
-        .returning();
-
-      const [dbSubCat] = await tx
-        .insert(categories)
-        .values({
-          ownerId,
-          name: 'Database & SQL',
-          parentCategoryId: engCat.id,
-          sortOrder: 2,
-        })
-        .returning();
-
-      const [researchCat] = await tx
-        .insert(categories)
-        .values({
-          ownerId,
-          name: 'Research & Reading',
-          parentCategoryId: null,
-          sortOrder: 3,
-        })
-        .returning();
-
-      const catLookup = {
-        fe: feSubCat.id,
-        db: dbSubCat.id,
-        research: researchCat.id,
-      };
-
       for (const item of STARTER_BOOKMARKS) {
         const normalized = normalizeBookmarkUrl(item.url);
-        const assignment = resolveCategoryAssignment(catLookup[item.catKey]);
+        const targetCatId = findSubOrMainId(
+          item.mainCategoryName,
+          item.subcategoryName
+        );
+        const assignment = resolveCategoryAssignment(targetCatId);
 
         const [created] = await tx
           .insert(bookmarks)
@@ -260,12 +249,124 @@ async function hydrateBookmarks(
 ): Promise<BookmarkRecord[]> {
   if (rows.length === 0) return [];
 
-  const catRows = await db
-    .select()
-    .from(categories)
-    .where(eq(categories.ownerId, ownerId));
+  const bmIds = rows.map((r) => r.id);
+
+  const [catRows, tagLinks, allOwnerTags, decisionRows, occRows] =
+    await Promise.all([
+      db
+        .select()
+        .from(categories)
+        .where(eq(categories.ownerId, ownerId)),
+      db
+        .select()
+        .from(bookmarkTags)
+        .where(
+          and(
+            eq(bookmarkTags.ownerId, ownerId),
+            inArray(bookmarkTags.bookmarkId, bmIds)
+          )
+        ),
+      db
+        .select()
+        .from(tags)
+        .where(eq(tags.ownerId, ownerId)),
+      db
+        .select()
+        .from(classificationDecisions)
+        .where(
+          and(
+            eq(classificationDecisions.ownerId, ownerId),
+            inArray(classificationDecisions.bookmarkId, bmIds)
+          )
+        )
+        .orderBy(desc(classificationDecisions.createdAt)),
+      db
+        .select({
+          canonicalBookmarkId: importOccurrences.canonicalBookmarkId,
+          folderPathJson: importOccurrences.folderPathJson,
+        })
+        .from(importOccurrences)
+        .where(
+          and(
+            eq(importOccurrences.ownerId, ownerId),
+            inArray(importOccurrences.canonicalBookmarkId, bmIds)
+          )
+        ),
+    ]);
 
   const catMap = new Map(catRows.map((c) => [c.id, c]));
+  const tagMap = new Map(allOwnerTags.map((t) => [t.id, t]));
+
+  const tagsByBm = new Map<string, TagRecord[]>();
+  for (const link of tagLinks) {
+    const tagRow = tagMap.get(link.tagId);
+    if (!tagRow) continue;
+    const list = tagsByBm.get(link.bookmarkId) ?? [];
+    list.push({
+      id: tagRow.id,
+      name: tagRow.name,
+      normalizedName: tagRow.normalizedName,
+      source: (link.source as TagRecord['source']) || 'manual',
+    });
+    tagsByBm.set(link.bookmarkId, list);
+  }
+
+  const latestDecisionByBm = new Map<string, ClassificationDecisionSummary>();
+  for (const d of decisionRows) {
+    if (latestDecisionByBm.has(d.bookmarkId)) continue;
+    let evidence: string[] = [];
+    try {
+      const parsed = JSON.parse(d.evidenceJson);
+      if (Array.isArray(parsed)) {
+        evidence = parsed.map((s) => String(s));
+      } else if (parsed && typeof parsed.explanation === 'string') {
+        evidence = [parsed.explanation];
+      }
+    } catch {
+      evidence = [];
+    }
+
+    let matchedRuleIds: string[] = [];
+    try {
+      const parsed = JSON.parse(d.matchedRuleIdsJson);
+      if (Array.isArray(parsed)) {
+        matchedRuleIds = parsed.map((s) => String(s));
+      }
+    } catch {
+      matchedRuleIds = [];
+    }
+
+    latestDecisionByBm.set(d.bookmarkId, {
+      classificationMethod:
+        (d.classificationMethod as ClassificationDecisionSummary['classificationMethod']) ||
+        'auto_classified',
+      confidence: Number(d.confidence ?? 0),
+      evidence,
+      matchedRuleIds,
+      rulesetVersion: d.rulesetVersion,
+      requiresReview: d.requiresReview,
+      createdAt: d.createdAt.toISOString(),
+    });
+  }
+
+  const foldersByBm = new Map<string, string[][]>();
+  for (const occ of occRows) {
+    if (!occ.canonicalBookmarkId) continue;
+    try {
+      const parsed = JSON.parse(occ.folderPathJson);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const list = foldersByBm.get(occ.canonicalBookmarkId) ?? [];
+        const pathArr = parsed.map((s) => String(s));
+        const key = pathArr.join(' / ');
+        if (!list.some((existing) => existing.join(' / ') === key)) {
+          list.push(pathArr);
+        }
+        foldersByBm.set(occ.canonicalBookmarkId, list);
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   return rows.map((row) => {
     const primaryCat = row.primaryCategoryId
@@ -290,8 +391,12 @@ async function hydrateBookmarks(
       primaryCategoryName: primaryCat ? primaryCat.name : null,
       parentCategoryId: parentCat ? parentCat.id : null,
       parentCategoryName: parentCat ? parentCat.name : null,
-      categorySource: (row.categorySource as CategoryAssignmentSource) || 'uncategorized',
+      categorySource:
+        (row.categorySource as CategoryAssignmentSource) || 'uncategorized',
       categoryLocked: row.categoryLocked,
+      tags: tagsByBm.get(row.id) ?? [],
+      latestDecision: latestDecisionByBm.get(row.id) ?? null,
+      sourceFolderPaths: foldersByBm.get(row.id) ?? [],
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -323,6 +428,7 @@ function filterBookmarkList(
     }
     if (options?.search && options.search.trim().length > 0) {
       const q = options.search.trim().toLowerCase();
+      const tagText = (b.tags ?? []).map((t) => t.name).join(' ');
       const hay = [
         b.title,
         b.domain,
@@ -331,6 +437,7 @@ function filterBookmarkList(
         b.notes ?? '',
         b.primaryCategoryName ?? '',
         b.parentCategoryName ?? '',
+        tagText,
       ]
         .join(' ')
         .toLowerCase();
@@ -352,6 +459,8 @@ export async function listBookmarksForOwner(
   }
 ): Promise<BookmarkRecord[]> {
   try {
+    await ensureInitialTaxonomyForOwner(ownerId);
+
     if (!process.env.SQL_HOST) {
       const hydrated = fallbackHydrateBookmarks(ownerId);
       return filterBookmarkList(hydrated, options);
@@ -414,11 +523,14 @@ export async function createBookmarkForOwner(
     notes?: string | null;
     categoryId?: string | null;
     isFavorite?: boolean;
+    tags?: string[];
   }
 ): Promise<BookmarkRecord> {
   const normalized = normalizeBookmarkUrl(input.url);
 
   try {
+    await ensureInitialTaxonomyForOwner(ownerId);
+
     if (!process.env.SQL_HOST) {
       const existing = fallbackFindByNormalizedKey(
         ownerId,
@@ -440,7 +552,7 @@ export async function createBookmarkForOwner(
           ? input.title.trim()
           : normalized.fallbackTitle;
 
-      return fallbackInsertBookmark(ownerId, {
+      const created = fallbackInsertBookmark(ownerId, {
         originalUrl: normalized.originalUrl,
         normalizedUrlKey: normalized.normalizedUrlKey,
         domain: normalized.domain,
@@ -458,6 +570,25 @@ export async function createBookmarkForOwner(
         categorySource: assignment.categorySource,
         categoryLocked: assignment.categoryLocked,
       });
+
+      if (input.tags && input.tags.length > 0) {
+        await syncBookmarkTagsForOwner(ownerId, created.id, input.tags, 'manual');
+      }
+
+      if (assignment.primaryCategoryId) {
+        await recordManualClassificationForOwner(
+          ownerId,
+          created.id,
+          assignment.primaryCategoryId
+        );
+      } else {
+        await autoClassifyBookmarksBatchForOwner(ownerId, [created.id]);
+      }
+
+      const rehydrated = fallbackHydrateBookmarks(ownerId).find(
+        (b) => b.id === created.id
+      );
+      return rehydrated ?? created;
     }
 
     const existingRows = await db
@@ -540,7 +671,37 @@ export async function createBookmarkForOwner(
       return created;
     });
 
-    const [hydrated] = await hydrateBookmarks(ownerId, [insertedRow]);
+    if (input.tags && input.tags.length > 0) {
+      await syncBookmarkTagsForOwner(
+        ownerId,
+        insertedRow.id,
+        input.tags,
+        'manual'
+      );
+    }
+
+    if (assignment.primaryCategoryId) {
+      await recordManualClassificationForOwner(
+        ownerId,
+        insertedRow.id,
+        assignment.primaryCategoryId
+      );
+    } else {
+      await autoClassifyBookmarksBatchForOwner(ownerId, [insertedRow.id]);
+    }
+
+    const freshRows = await db
+      .select()
+      .from(bookmarks)
+      .where(
+        and(eq(bookmarks.id, insertedRow.id), eq(bookmarks.ownerId, ownerId))
+      )
+      .limit(1);
+
+    const [hydrated] = await hydrateBookmarks(
+      ownerId,
+      freshRows.length > 0 ? freshRows : [insertedRow]
+    );
     return hydrated;
   } catch (error) {
     if (
@@ -564,9 +725,18 @@ export async function updateBookmarkForOwner(
     notes?: string | null;
     categoryId?: string | null;
     isFavorite?: boolean;
+    tags?: string[];
+    createReusableRule?: {
+      ruleType: ClassificationRuleType;
+      pattern: string;
+      name?: string;
+      applyToMatchingUnlocked?: boolean;
+    } | null;
   }
 ): Promise<BookmarkRecord> {
   try {
+    await ensureInitialTaxonomyForOwner(ownerId);
+
     if (!process.env.SQL_HOST) {
       const all = fallbackHydrateBookmarks(ownerId);
       const current = all.find((b) => b.id === bookmarkId);
@@ -598,6 +768,7 @@ export async function updateBookmarkForOwner(
       let primaryCategoryId = current.primaryCategoryId;
       let categorySource = current.categorySource;
       let categoryLocked = current.categoryLocked;
+      let categoryChanged = false;
 
       if (input.categoryId !== undefined) {
         const requestedCatId =
@@ -605,6 +776,7 @@ export async function updateBookmarkForOwner(
             ? input.categoryId.trim()
             : null;
         if (requestedCatId !== current.primaryCategoryId) {
+          categoryChanged = true;
           if (requestedCatId) {
             const validCat =
               ownerCats.find((c) => c.id === requestedCatId)?.id ?? null;
@@ -654,7 +826,37 @@ export async function updateBookmarkForOwner(
       if (!updated) {
         throw new BookmarkNotFoundError();
       }
-      return updated;
+
+      if (input.tags !== undefined) {
+        await syncBookmarkTagsForOwner(ownerId, bookmarkId, input.tags, 'manual');
+      }
+
+      if (categoryChanged) {
+        await recordManualClassificationForOwner(
+          ownerId,
+          bookmarkId,
+          primaryCategoryId
+        );
+      }
+
+      if (input.createReusableRule && primaryCategoryId) {
+        await createClassificationRuleForOwner(ownerId, {
+          name: input.createReusableRule.name,
+          ruleType: input.createReusableRule.ruleType,
+          pattern: input.createReusableRule.pattern,
+          categoryId: primaryCategoryId,
+        });
+        if (input.createReusableRule.applyToMatchingUnlocked) {
+          await applyClassifyUncategorizedForOwner(ownerId, {
+            includeAutoCategorized: true,
+          });
+        }
+      }
+
+      const rehydrated = fallbackHydrateBookmarks(ownerId).find(
+        (b) => b.id === bookmarkId
+      );
+      return rehydrated ?? updated;
     }
 
     const existingRows = await db
@@ -819,6 +1021,32 @@ export async function updateBookmarkForOwner(
 
       return updated;
     });
+
+    if (input.tags !== undefined) {
+      await syncBookmarkTagsForOwner(ownerId, bookmarkId, input.tags, 'manual');
+    }
+
+    if (categoryChanged) {
+      await recordManualClassificationForOwner(
+        ownerId,
+        bookmarkId,
+        primaryCategoryId
+      );
+    }
+
+    if (input.createReusableRule && primaryCategoryId) {
+      await createClassificationRuleForOwner(ownerId, {
+        name: input.createReusableRule.name,
+        ruleType: input.createReusableRule.ruleType,
+        pattern: input.createReusableRule.pattern,
+        categoryId: primaryCategoryId,
+      });
+      if (input.createReusableRule.applyToMatchingUnlocked) {
+        await applyClassifyUncategorizedForOwner(ownerId, {
+          includeAutoCategorized: true,
+        });
+      }
+    }
 
     const [hydrated] = await hydrateBookmarks(ownerId, [updatedRow]);
     return hydrated;

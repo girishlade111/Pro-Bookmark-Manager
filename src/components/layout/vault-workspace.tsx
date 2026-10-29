@@ -16,7 +16,10 @@ import {
   Plus,
   Search,
   ShieldAlert,
+  SlidersHorizontal,
+  Sparkles,
   Star,
+  Upload,
   X,
 } from 'lucide-react';
 import type {
@@ -31,12 +34,18 @@ import { BookmarkCard } from '@/components/bookmarks/bookmark-card';
 import { BookmarkFormModal } from '@/components/bookmarks/bookmark-form-modal';
 import { DeleteConfirmModal } from '@/components/bookmarks/delete-confirm-modal';
 import { CategoryManager } from '@/components/categories/category-manager';
+import { ReviewQueueManager } from '@/components/classification/review-queue-manager';
+import { RulesManager } from '@/components/classification/rules-manager';
+import { ImportManager } from '@/components/imports/import-manager';
 
 export type WorkspaceSection =
   | 'dashboard'
   | 'bookmarks'
   | 'categories'
-  | 'favorites';
+  | 'favorites'
+  | 'imports'
+  | 'review'
+  | 'rules';
 
 interface VaultWorkspaceProps {
   initialSection?: WorkspaceSection;
@@ -68,6 +77,7 @@ export function VaultWorkspace({
     []
   );
   const [bookmarks, setBookmarks] = useState<BookmarkRecord[]>([]);
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
   // Filtering and view mode state
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
@@ -87,12 +97,10 @@ export function VaultWorkspace({
   const loadWorkspaceData = useCallback(async () => {
     setErrorMessage(null);
     try {
-      // 1. Check session first
       let sessionRes = await fetch('/api/auth/session');
       let sessionData = await sessionRes.json();
 
       if (!sessionData.authorizedOwner) {
-        // Attempt automatic owner session initialization if BOOKMARK_OWNER_AUTH_USER_ID is configured
         const initRes = await fetch('/api/auth/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -112,9 +120,10 @@ export function VaultWorkspace({
         return;
       }
 
-      const [dashRes, bmRes] = await Promise.all([
+      const [dashRes, bmRes, revRes] = await Promise.all([
         fetch('/api/dashboard'),
         fetch('/api/bookmarks'),
+        fetch('/api/v1/classification/review?status=pending'),
       ]);
 
       if (!dashRes.ok || !bmRes.ok) {
@@ -123,10 +132,14 @@ export function VaultWorkspace({
 
       const dashData = await dashRes.json();
       const bmData = await bmRes.json();
+      const revData = revRes.ok ? await revRes.json() : null;
 
       setSummary(dashData.summary);
       setCategoriesTree(dashData.categories.tree || []);
       setBookmarks(bmData.bookmarks || []);
+      if (revData?.stats) {
+        setPendingReviewCount(revData.stats.pendingReviewCount ?? 0);
+      }
     } catch (err) {
       setErrorMessage(
         err instanceof Error
@@ -159,6 +172,7 @@ export function VaultWorkspace({
       }
       if (searchQuery.trim().length > 0) {
         const q = searchQuery.trim().toLowerCase();
+        const tagsStr = (b.tags ?? []).map((t) => t.name).join(' ');
         const hay = [
           b.title,
           b.domain,
@@ -167,6 +181,7 @@ export function VaultWorkspace({
           b.notes ?? '',
           b.primaryCategoryName ?? '',
           b.parentCategoryName ?? '',
+          tagsStr,
         ]
           .join(' ')
           .toLowerCase();
@@ -291,7 +306,7 @@ export function VaultWorkspace({
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* Strict 3-Zone Top Bar Contract */}
+      {/* Strict 3-Zone Top Bar Contract (5 Top-Level Links) */}
       <header className="sticky top-0 z-30 flex items-center justify-between gap-3 sm:gap-8 border-b border-slate-200 bg-white px-4 sm:px-6 py-3.5">
         <a
           href="/dashboard"
@@ -347,14 +362,25 @@ export function VaultWorkspace({
           </button>
           <button
             type="button"
-            onClick={() => handleSwitchSection('favorites')}
+            onClick={() => handleSwitchSection('review')}
             className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              activeSection === 'favorites'
+              activeSection === 'review' || activeSection === 'rules'
                 ? 'text-slate-900 font-semibold underline underline-offset-8'
                 : ''
             }`}
           >
-            Favorites
+            Smart Classify
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSwitchSection('imports')}
+            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              activeSection === 'imports'
+                ? 'text-slate-900 font-semibold underline underline-offset-8'
+                : ''
+            }`}
+          >
+            Import HTML
           </button>
         </nav>
 
@@ -393,7 +419,7 @@ export function VaultWorkspace({
           <button
             type="button"
             onClick={() => handleSwitchSection('dashboard')}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
+            className={`px-2 py-1 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
               activeSection === 'dashboard'
                 ? 'bg-slate-900 text-white'
                 : 'text-slate-600'
@@ -404,7 +430,7 @@ export function VaultWorkspace({
           <button
             type="button"
             onClick={() => handleSwitchSection('bookmarks')}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
+            className={`px-2 py-1 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
               activeSection === 'bookmarks'
                 ? 'bg-slate-900 text-white'
                 : 'text-slate-600'
@@ -414,14 +440,14 @@ export function VaultWorkspace({
           </button>
           <button
             type="button"
-            onClick={() => handleSwitchSection('categories')}
-            className={`px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
-              activeSection === 'categories'
+            onClick={() => handleSwitchSection('review')}
+            className={`px-2 py-1 text-xs font-medium rounded-md whitespace-nowrap shrink-0 ${
+              activeSection === 'review' || activeSection === 'rules'
                 ? 'bg-slate-900 text-white'
                 : 'text-slate-600'
             }`}
           >
-            Categories
+            Classify
           </button>
         </div>
       </div>
@@ -516,13 +542,48 @@ export function VaultWorkspace({
               >
                 <span className="flex items-center gap-2.5 truncate">
                   <FolderTree className="h-4 w-4 shrink-0" />
-                  {!sidebarCollapsed && <span>Categories</span>}
+                  {!sidebarCollapsed && <span>Categories (18/83)</span>}
                 </span>
                 {!sidebarCollapsed && (
                   <span className="font-mono text-[11px] tabular-nums text-slate-500">
                     {summary.totalCategories}
                   </span>
                 )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSwitchSection('review')}
+                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
+                  activeSection === 'review'
+                    ? 'bg-slate-100 text-slate-900 font-semibold'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span className="flex items-center gap-2.5 truncate">
+                  <Sparkles className="h-4 w-4 shrink-0" />
+                  {!sidebarCollapsed && <span>Review Queue</span>}
+                </span>
+                {!sidebarCollapsed && (
+                  <span className="font-mono text-[11px] tabular-nums text-slate-500">
+                    {pendingReviewCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSwitchSection('rules')}
+                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
+                  activeSection === 'rules'
+                    ? 'bg-slate-100 text-slate-900 font-semibold'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span className="flex items-center gap-2.5 truncate">
+                  <SlidersHorizontal className="h-4 w-4 shrink-0" />
+                  {!sidebarCollapsed && <span>Smart Rules</span>}
+                </span>
               </button>
 
               <button
@@ -544,6 +605,21 @@ export function VaultWorkspace({
                   </span>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={() => handleSwitchSection('imports')}
+                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
+                  activeSection === 'imports'
+                    ? 'bg-slate-100 text-slate-900 font-semibold'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span className="flex items-center gap-2.5 truncate">
+                  <Upload className="h-4 w-4 shrink-0" />
+                  {!sidebarCollapsed && <span>Import Bookmarks</span>}
+                </span>
+              </button>
             </nav>
 
             {!sidebarCollapsed && (
@@ -561,7 +637,26 @@ export function VaultWorkspace({
                   </button>
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-1 max-h-96 overflow-y-auto pr-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectCategoryFromSidebar(null, true)}
+                    className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${
+                      uncategorizedOnly
+                        ? 'bg-slate-900 text-white font-medium'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="truncate">Uncategorized</span>
+                    <span
+                      className={`font-mono text-[11px] tabular-nums ${
+                        uncategorizedOnly ? 'text-slate-200' : 'text-slate-400'
+                      }`}
+                    >
+                      {summary.uncategorizedCount}
+                    </span>
+                  </button>
+
                   {categoriesTree.map((main) => (
                     <div key={main.id} className="space-y-0.5">
                       <button
@@ -586,44 +681,8 @@ export function VaultWorkspace({
                           {main.bookmarkCount}
                         </span>
                       </button>
-
-                      {main.subcategories.map((sub) => (
-                        <button
-                          key={sub.id}
-                          type="button"
-                          onClick={() =>
-                            handleSelectCategoryFromSidebar(sub.id, false)
-                          }
-                          className={`flex w-full items-center justify-between rounded-md pl-6 pr-2.5 py-1 text-xs transition-colors cursor-pointer ${
-                            selectedCategoryId === sub.id
-                              ? 'bg-slate-900 text-white font-medium'
-                              : 'text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          <span className="truncate">{sub.name}</span>
-                        </button>
-                      ))}
                     </div>
                   ))}
-
-                  <button
-                    type="button"
-                    onClick={() => handleSelectCategoryFromSidebar(null, true)}
-                    className={`flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-xs transition-colors cursor-pointer ${
-                      uncategorizedOnly
-                        ? 'bg-slate-900 text-white font-medium'
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="truncate">Uncategorized</span>
-                    <span
-                      className={`font-mono text-[11px] tabular-nums ${
-                        uncategorizedOnly ? 'text-slate-200' : 'text-slate-400'
-                      }`}
-                    >
-                      {summary.uncategorizedCount}
-                    </span>
-                  </button>
                 </div>
               </div>
             )}
@@ -719,8 +778,29 @@ export function VaultWorkspace({
                     Owner Bookmark Overview
                   </h1>
                   <p className="text-sm text-slate-600 mt-1">
-                    Central PostgreSQL bookmark repository with conservative full-URL duplicate prevention.
+                    Central PostgreSQL bookmark repository with conservative full-URL duplicate prevention and deterministic 18/83 classification.
                   </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSwitchSection('review')}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Smart Classify &amp; Review ({pendingReviewCount})
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSwitchSection('imports')}
+                  >
+                    <Upload className="h-4 w-4" />
+                    Import Browser HTML
+                  </Button>
                 </div>
               </div>
 
@@ -755,7 +835,7 @@ export function VaultWorkspace({
                     {summary.totalCategories}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    Main categories & subcategories
+                    18 main categories &amp; subcategories
                   </p>
                 </div>
 
@@ -817,12 +897,22 @@ export function VaultWorkspace({
                       Your bookmark vault is empty
                     </h3>
                     <p className="text-sm text-slate-600 max-w-md mx-auto">
-                      Add your first personal bookmark to store it in PostgreSQL with full-URL duplicate detection and manual category priority.
+                      Add your first personal bookmark or import a Netscape Bookmark HTML file to store it in PostgreSQL with full-URL duplicate detection.
                     </p>
-                    <Button type="button" onClick={handleOpenAddModal}>
-                      <Plus className="h-4 w-4" />
-                      Add First Bookmark
-                    </Button>
+                    <div className="flex items-center justify-center gap-2">
+                      <Button type="button" onClick={handleOpenAddModal}>
+                        <Plus className="h-4 w-4" />
+                        Add First Bookmark
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => handleSwitchSection('imports')}
+                      >
+                        <Upload className="h-4 w-4" />
+                        Import HTML
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -844,7 +934,7 @@ export function VaultWorkspace({
             <div className="space-y-6">
               <div>
                 <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
-                  Categories & Subcategories
+                  Categories &amp; Subcategories (18/83 Taxonomy)
                 </h1>
                 <p className="text-sm text-slate-600 mt-1">
                   Manual category assignments always lock priority over future automated classification.
@@ -854,8 +944,88 @@ export function VaultWorkspace({
               <CategoryManager
                 categoriesTree={categoriesTree}
                 uncategorizedCount={summary.uncategorizedCount}
+                pendingReviewCount={pendingReviewCount}
                 onSelectCategoryFilter={handleSelectCategoryFromSidebar}
+                onNavigateToReview={() => handleSwitchSection('review')}
                 onRefresh={loadWorkspaceData}
+              />
+            </div>
+          ) : activeSection === 'review' ? (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+                    Deterministic Classification &amp; Manual Review Queue
+                  </h1>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Non-AI rule-based categorization across the 18 main categories and 83 subcategories with strict manual lock protection.
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSwitchSection('rules')}
+                >
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Classification Rules
+                </Button>
+              </div>
+
+              <ReviewQueueManager
+                categoriesTree={categoriesTree}
+                onRefreshWorkspace={loadWorkspaceData}
+                onNavigateToRules={() => handleSwitchSection('rules')}
+              />
+            </div>
+          ) : activeSection === 'rules' ? (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+                    Classification Rules Management
+                  </h1>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Manage owner-defined exact URL, path prefix, hostname, folder mapping, and keyword rules with impact preview.
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleSwitchSection('review')}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Back to Review Queue ({pendingReviewCount})
+                </Button>
+              </div>
+
+              <RulesManager
+                categoriesTree={categoriesTree}
+                onRefreshWorkspace={loadWorkspaceData}
+              />
+            </div>
+          ) : activeSection === 'imports' ? (
+            <div className="space-y-6">
+              <div>
+                <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">
+                  Browser HTML Bookmark Import
+                </h1>
+                <p className="text-sm text-slate-600 mt-1">
+                  Parse Netscape Bookmark HTML exports, reconcile duplicates by conservative full URL, preserve nested browser folder hierarchy, and auto-categorize uncategorized imports.
+                </p>
+              </div>
+
+              <ImportManager
+                categoriesTree={categoriesTree}
+                onImportCompleted={loadWorkspaceData}
+                onNavigateToBookmarks={(catId) => {
+                  setSelectedCategoryId(catId || null);
+                  setUncategorizedOnly(false);
+                  setActiveSection('bookmarks');
+                }}
               />
             </div>
           ) : (
@@ -932,8 +1102,8 @@ export function VaultWorkspace({
                   <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <Input
                     type="search"
-                    aria-label="Filter bookmarks by title, URL, domain, or notes"
-                    placeholder="Filter by title, full URL, domain, or notes..."
+                    aria-label="Filter bookmarks by title, URL, domain, tags, or notes"
+                    placeholder="Filter by title, full URL, domain, tags, or notes..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-9"
@@ -1051,7 +1221,7 @@ export function VaultWorkspace({
         onSaved={() => void loadWorkspaceData()}
       />
 
-      {/* Delete Bookmark Confirmation Modal */}
+      {/* Delete Confirmation Modal */}
       <DeleteConfirmModal
         bookmark={deletingBookmark}
         onClose={() => setDeletingBookmark(null)}
